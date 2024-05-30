@@ -17,6 +17,42 @@ quat2 = data[['w2', 'x2', 'y2', 'z2']].values
 loc1 = data[['loc1_x', 'loc1_y', 'loc1_z']].values
 loc2 = data[['loc2_x', 'loc2_y', 'loc2_z']].values
 
+# convert quaternions to euler angles
+euler1 = R.from_quat(quat1).as_euler('xyz', degrees=True)
+euler2 = R.from_quat(quat2).as_euler('xyz', degrees=True)
+
+# calculate euler differences between the two sensors from the quaternions
+r1 = R.from_quat(quat1)
+r2 = R.from_quat(quat2)
+r = r2 * r1.inv()
+euler_diff = r.as_euler('xyz', degrees=True)
+
+# # plot the euler angles
+# plt.figure()
+# plt.plot(time, euler1[:, 0], label='x 1')
+# plt.plot(time, euler1[:, 1], label='y 1')
+# plt.plot(time, euler1[:, 2], label='z 1')
+# plt.plot(time, euler2[:, 0], label='x 2')
+# plt.plot(time, euler2[:, 1], label='y 2')
+# plt.plot(time, euler2[:, 2], label='z 2')
+# plt.xlabel('Time [s]')
+# plt.ylabel('Angle [deg]')
+# plt.title('Euler angles')
+# plt.legend()
+# plt.show()
+
+# plot the euler differences
+plt.figure()
+plt.plot(time, euler_diff[:, 0], label='x')
+plt.plot(time, euler_diff[:, 1], label='y')
+plt.plot(time, euler_diff[:, 2], label='z')
+plt.xlabel('Time [s]')
+plt.ylabel('Angle [deg]')
+plt.title('Euler angle differences')
+plt.legend()
+plt.show()
+
+
 # Convert quaternions to rotation matrices
 rot1 = R.from_quat(quat1).as_matrix()
 rot2 = R.from_quat(quat2).as_matrix()
