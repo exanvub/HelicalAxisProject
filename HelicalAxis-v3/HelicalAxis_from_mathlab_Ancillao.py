@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 # Load the .mat file
-data = scipy.io.loadmat('/Users/nicolas/Github/exanvub/HelicalAxisProject/HelicalAxis-Literature/Andrea Ancillao/IHA_paper-main/DATA/HingeSampleData.mat')
+data = scipy.io.loadmat('./HelicalAxis-Literature/Andrea Ancillao/IHA_paper-main/DATA/HingeSampleData.mat')
 hinge = data['hinge']
 
 

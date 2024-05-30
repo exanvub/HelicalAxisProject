@@ -5,9 +5,9 @@ import pandas as pd
 from scipy.spatial.transform import Rotation as R
 
 # Read the CSV file containing sensor data
-# data = pd.read_csv('/Users/nicolas/Github/exanvub/HelicalAxisProject/test_data/Polhemus_test_data/Polhemus_90degX(clean)_2data.csv')
-data = pd.read_csv('/Users/nicolas/Github/exanvub/HelicalAxisProject/test_data/Polhemus_test_data/Polhemus_90degY_2data.csv')
-# data = pd.read_csv('/Users/nicolas/Github/exanvub/HelicalAxisProject/test_data/Polhemus_test_data/Polhemus_90degZ_1data.csv')
+data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degX(clean)_2data.csv')
+# data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degY_2data.csv')
+# data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degZ_1data.csv')
 
 
 # Extract relevant data
