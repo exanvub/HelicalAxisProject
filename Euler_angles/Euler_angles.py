@@ -157,16 +157,19 @@ with open(path+filename, 'r') as csvfile:
         z2 = float(row['z2'])
         q1 = w1, x1, y1, z1
         q2 = w2, x2, y2, z2
-        print(q2)
+        scipy_q1 = x1, y1, z1, w1
+        scipy_q2 = x2, y2, z2, w2
+
+        
         X_1, Y_1, Z_1 = quaternion_to_euler1(w1, x1, y1, z1)
         X_2, Y_2, Z_2 = quaternion_to_euler2(w2, x2, y2, z2)
         Plot_euler_sensor_1.append([X_1, Y_1, Z_1])
         Plot_euler_sensor_2.append([X_2, Y_2, Z_2])
 
-        diff_xzy = calculate_angular_difference_xzy(q1, q2)
-        diff_xyz_inv = calculate_angular_difference_xyz_inv(q1, q2)
-        diff_yxz = calculate_angular_difference_yxz(q1, q2)
-        diff_xyz = calculate_angular_difference_xyz(q1, q2)
+        diff_xzy = calculate_angular_difference_xzy(scipy_q1, scipy_q2)
+        diff_xyz_inv = calculate_angular_difference_xyz_inv(scipy_q1, scipy_q2)
+        diff_yxz = calculate_angular_difference_yxz(scipy_q1, scipy_q2)
+        diff_xyz = calculate_angular_difference_xyz(scipy_q1, scipy_q2)
 
         Diff_xzy_plot.append(diff_xzy)
         Diff_yxz_plot.append(diff_yxz)
@@ -202,18 +205,19 @@ ax4.plot(Diff_xyz_plot_inv)
 ax4.legend(['xi', 'yi', 'zi'], bbox_to_anchor=(1, 1), loc='upper left')
 ax4.set_ylabel('femur rel. to tibia')
 
-#### write to csv ####
-import os
-def write_data_to_csv(data,path, original_filename):
-    adjusted_filename = original_filename.replace('.csv', '_euler-xyz-sequence.csv')
-    adjusted_filepath = os.path.join(path, adjusted_filename)
-    #header_row = ['time', 'q1_w', 'q1_x', 'q1_y', 'q1_z', 'q2_w', 'q2_x', 'q2_y', 'q2_z'] #Quat only
-    header_row = ['time', 'X_1', 'Y_1', 'Z_1', 'X_2', 'Y_2', 'Z_2', 'diff_x', 'diff_y', 'diff_z', 'diff_x_inv', 'diff_y_inv', 'diff_z_inv']
-    with open(adjusted_filepath, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(header_row)
-        writer.writerows(data)
-
-write_data_to_csv(dataout,path, filename)
-
 plt.show()
+
+# #### write to csv ####
+# import os
+# def write_data_to_csv(data,path, original_filename):
+#     adjusted_filename = original_filename.replace('.csv', '_euler-xyz-sequence.csv')
+#     adjusted_filepath = os.path.join(path, adjusted_filename)
+#     #header_row = ['time', 'q1_w', 'q1_x', 'q1_y', 'q1_z', 'q2_w', 'q2_x', 'q2_y', 'q2_z'] #Quat only
+#     header_row = ['time', 'X_1', 'Y_1', 'Z_1', 'X_2', 'Y_2', 'Z_2', 'diff_x', 'diff_y', 'diff_z', 'diff_x_inv', 'diff_y_inv', 'diff_z_inv']
+#     with open(adjusted_filepath, mode='w', newline='') as file:
+#         writer = csv.writer(file)
+#         writer.writerow(header_row)
+#         writer.writerows(data)
+
+# write_data_to_csv(dataout,path, filename)
+

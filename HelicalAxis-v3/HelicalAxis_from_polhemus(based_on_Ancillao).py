@@ -5,15 +5,15 @@ import pandas as pd
 from scipy.spatial.transform import Rotation as R
 
 # Read the CSV file containing sensor data
-data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degX(clean)_2data.csv')
+# data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degX(clean)_2data.csv')
 # data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degY_2data.csv')
-# data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degZ_1data.csv')
+data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degZ_1data.csv')
 
 
 # Extract relevant data
 time = data['Time'].values
-quat1 = data[['w1', 'x1', 'y1', 'z1']].values
-quat2 = data[['w2', 'x2', 'y2', 'z2']].values
+quat1 = data[['x1', 'y1', 'z1', 'w1']].values
+quat2 = data[['x2', 'y2', 'z2', 'w2']].values
 loc1 = data[['loc1_x', 'loc1_y', 'loc1_z']].values
 loc2 = data[['loc2_x', 'loc2_y', 'loc2_z']].values
 
