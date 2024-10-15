@@ -1,1 +1,2 @@
-The CSV files in this folder contian rows for the timestamp, Quaternion for sensor 1, Quaternion for sensor 2, Location of sensor 1 and location of sensor 2. All relative to the Polhemus hemisphere
+The CSV files in this folder contain rows for the timestamp, Quaternion for sensor 1, Quaternion for sensor 2, Location of sensor 1 and location of sensor 2. All relative to the Polhemus hemisphere
+And a video of the registration
