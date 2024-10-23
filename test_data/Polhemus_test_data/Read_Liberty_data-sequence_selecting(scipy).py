@@ -14,7 +14,7 @@ import threading
 # filename = 'Bregje-Lsnapshot.csv'
 # data = path + filename
 
-data = 'test_data/Polhemus_test_data/1_90deg_ydata.csv'
+data = 'test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv'
 
 ##### conversion to euler angles #####
 

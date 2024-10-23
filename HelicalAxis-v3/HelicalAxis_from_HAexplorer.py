@@ -8,7 +8,7 @@ from scipy.spatial.transform import Rotation as R
 # Read the CSV file containing sensor data
 # data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degX(clean)_2data.csv')
 # data = pd.read_csv('./test_data/Polhemus_test_data/Polhemus_90degY_2data.csv')
-data = pd.read_csv('/Users/nicolas/Github/exanvub/HelicalAxisProject/test_data/Polhemus_test_data/1_90deg_ydata.csv')
+data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
 
 # Extract relevant data
 time = data['Time'].values
