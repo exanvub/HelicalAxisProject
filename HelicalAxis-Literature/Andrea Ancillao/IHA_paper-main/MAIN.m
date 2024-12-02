@@ -46,7 +46,7 @@ addpath(genpath('lib'));
 
 
 %% 1 Load and visualize data
-load('/Users/nicolas/Library/CloudStorage/OneDrive-VrijeUniversiteitBrussel/Onderzoek/Helical-axis/Andrea Ancillao/IHA_paper-main/DATA/HingeSampleData.mat');
+load('/Users/nicolas/Github/exanvub/HelicalAxisProject/HelicalAxis-Literature/Andrea Ancillao/IHA_paper-main/DATA/HingeSampleData.mat');
 % The data consists in the motion capture recording of an artificial hinge
 % joint in a free swing after an initial perturbation. For more info see:
 % Ancillao, A., et al.,(2020). Estimating the instantaneous screw axis and the screw axis invariant descriptor of motion by means of inertial sensors: An experimental study with a mechanical hinge joint and comparison to the optoelectronic system. Sensors (Switzerland), 20(1). https://doi.org/10.3390/s20010049
