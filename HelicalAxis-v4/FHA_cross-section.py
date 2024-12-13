@@ -10,6 +10,28 @@ plt.close('all')
 data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
 data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
 
+#### Choose method type ####
+# method_type = 'all_FHA'
+# method_type = 'incremental_time' 
+# method_type = 'step_angle'
+method_type = 'incremental_angle'
+
+
+##### Define value of steps and the number of samples to skip for plotting #####
+if method_type == 'all_FHA':
+    step = None # Not used
+    nn = 20
+elif method_type == 'incremental_time':
+    step = 100 # amount of samples to skip
+    nn = 10
+elif method_type == 'step_angle':
+    step = 2 # amount of degrees to skip
+    nn = 1
+elif method_type == 'incremental_angle':
+    step = 2 # amount of degrees to increment
+    nn = 20
+
+
 # Extract relevant data
 time = data['Time'].values
 q1 = data[['w1', 'x1', 'y1', 'z1']].values
@@ -17,6 +39,7 @@ q2 = data[['w2', 'x2', 'y2', 'z2']].values
 loc1 = data[['loc1_x', 'loc1_y', 'loc1_z']].values
 loc2 = data[['loc2_x', 'loc2_y', 'loc2_z']].values
 
+###### Choose the range of data ######
 cut1=20
 cut2=1500
 q1=q1[cut1:cut2]
@@ -24,6 +47,9 @@ q2=q2[cut1:cut2]
 loc1=loc1[cut1:cut2]
 loc2=loc2[cut1:cut2]
 time=time[cut1:cut2]
+
+
+
 
 # Scipy quaternion to rotation matrix convertion
 def quaternion_to_rotation_matrix(quaternion):
@@ -151,6 +177,8 @@ for i in range(len(Trel)-1):
 
 def activate_method(method_type, time, Trel, loc1, loc2, all_angles):
     hax, ang, svec, d, translation_1_list, translation_2_list = [], [], [], [], [], []
+    ind_incr, ind_step = [], []
+
     if method_type == 'all_FHA':
         hax = all_hax
         ang = all_angles
@@ -162,9 +190,8 @@ def activate_method(method_type, time, Trel, loc1, loc2, all_angles):
 
     elif method_type == 'incremental_time':
         # Incremental method (time-based)
-        incr = 20
-        for i in range(len(time) - incr):
-            phi, n, t, s = calculate_FHA(Trel[i], Trel[i + incr])
+        for i in range(len(time) - step):
+            phi, n, t, s = calculate_FHA(Trel[i], Trel[i + step])
             hax.append(n)
             ang.append(phi)
             svec.append(s)
@@ -173,9 +200,8 @@ def activate_method(method_type, time, Trel, loc1, loc2, all_angles):
             translation_1_list.append(loc1[i])
             translation_2_list.append(loc2[i])
     
-    elif method_type == 'incremental_step':
+    elif method_type == 'step_angle':
         # Incremental method (step-based)
-        step = 5
         angSum = 0
         ind_step = [0]
         for i in range(len(all_angles)):
@@ -187,7 +213,7 @@ def activate_method(method_type, time, Trel, loc1, loc2, all_angles):
         for i in range(1, len(ind_step)):
             phi, n, t, s = calculate_FHA(Trel[ind_step[i-1]], Trel[ind_step[i]])
             hax.append(n)
-            ang.append(math.degrees(phi))  # Assuming you want the angle in degrees
+            ang.append(phi)
             svec.append(s)
             d.append(t)
 
@@ -196,7 +222,6 @@ def activate_method(method_type, time, Trel, loc1, loc2, all_angles):
 
     elif method_type == 'incremental_angle':
         # Incremental method (angle-based)
-        step = 10
         angSum = 0
         ind_incr = []
         for i in range(len(all_angles) - 1):
@@ -218,17 +243,12 @@ def activate_method(method_type, time, Trel, loc1, loc2, all_angles):
             translation_2_list.append(loc2[ind_incr[i][0]])
 
     else:
-        raise ValueError("Invalid method type. Choose from 'incremental_time', 'incremental_step', or 'incremental_angle'.")
+        raise ValueError("Invalid method type. Choose from 'incremental_time', 'step_angle', or 'incremental_angle'.")
     
-    return hax, ang, svec, d, translation_1_list, translation_2_list
+    return hax, ang, svec, d, translation_1_list, translation_2_list, ind_incr, ind_step
 
 
-# method_type = 'all_FHA'
-# method_type = 'incremental_time' 
-# method_type = 'incremental_step'
-method_type = 'incremental_angle'
-
-hax, ang, svec, d, translation_1_list, translation_2_list = activate_method(method_type, time, Trel, loc1, loc2, all_angles)
+hax, ang, svec, d, translation_1_list, translation_2_list, ind_incr, ind_step = activate_method(method_type, time, Trel, loc1, loc2, all_angles)
 
 
 #transform into sensor1 reference system for plotting
@@ -240,14 +260,32 @@ R1=np.array(R1)
 
 transformed_hax = []
 transformed_svec = []
-
-for i in range(len(hax)):
-    transformed_hax.append(np.dot(hax[i], R1[i]))
-    transformed_svec.append(np.dot(T1[i], np.append(svec[i], 1).transpose()))
-
 p = []
-for i in range(len(hax)):
-    p.append(transformed_svec[i][0:3] + d[i]*transformed_hax[i])
+
+if method_type == 'all_FHA':
+    # all_FHA
+    for i in range(len(hax)):
+        transformed_hax.append(np.dot(hax[i], R1[i]))
+        transformed_svec.append(np.dot(T1[i], np.append(svec[i], 1).transpose()))
+        p.append(transformed_svec[i][0:3] + d[i]*transformed_hax[i])
+elif method_type == 'incremental_time':
+    # incremental_time
+    for i in range(len(hax)):
+        transformed_hax.append(np.dot(hax[i], R1[i]))
+        transformed_svec.append(np.dot(T1[i], np.append(svec[i], 1).transpose()))
+        p.append(transformed_svec[i][0:3] + d[i]*transformed_hax[i])
+elif method_type == 'step_angle':
+    # incremental_step
+    for i in range(len(hax)):
+        transformed_hax.append(np.dot(hax[i], R1[ind_step[i]]))
+        transformed_svec.append(np.dot(T1[ind_step[i]], np.append(svec[i], 1).transpose()))
+        p.append(transformed_svec[i][0:3] + d[i]*transformed_hax[i])
+elif method_type == 'incremental_angle':
+    # incremental_angle
+    for i in range(len(hax)):
+        transformed_hax.append(np.dot(hax[i], R1[ind_incr[i][0]]))
+        transformed_svec.append(np.dot(T1[ind_incr[i][0]], np.append(svec[i], 1).transpose()))
+        p.append(transformed_svec[i][0:3] + d[i]*transformed_hax[i])
 
 ##### AHA calculation #####
 
@@ -274,7 +312,20 @@ average_end = average_start + axis_scale * average_hax
 average_p_homogeneous = np.append(average_p, 1)  # Make it homogeneous (x, y, z, 1)
 
 # Apply the transformation using T1[0] (or the initial transformation of Sensor 1)
-transformed_average_p = np.dot(T1[0], average_p_homogeneous)
+
+if method_type == 'all_FHA':
+    # all_FHA
+    transformed_average_p = np.dot(T1[0], average_p_homogeneous)
+elif method_type == 'incremental_time':
+    # incremental_time
+    transformed_average_p = np.dot(T1[0], average_p_homogeneous)
+elif method_type == 'step_angle':
+    # incremental_step
+    transformed_average_p = np.dot(T1[ind_step[0]], average_p_homogeneous)
+elif method_type == 'incremental_angle':
+    # incremental_angle
+    transformed_average_p = np.dot(T1[ind_incr[0][0]], average_p_homogeneous)
+
 
 # Extract the transformed (x, y, z) coordinates
 transformed_average_p = transformed_average_p[:3]
@@ -363,7 +414,6 @@ intersection_points = np.array(intersection_points)
 
 
 #reduce data dimensionality for plotting (1 sample every nn)
-nn = 50
 
 hax_small = hax[::nn]
 svec_small = svec[::nn]
@@ -436,8 +486,9 @@ ax.set_xlabel('X')
 ax.set_ylabel('Y')
 ax.set_zlabel('Z')
 
+plt.title(method_type)
 
-plt.show()
+plt.show(block=False)
 
 # Transform the points to the plane's local coordinate system
 plane_points_2d = []
@@ -467,3 +518,4 @@ plt.legend()
 plt.show()
 
 # %%
+
