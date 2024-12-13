@@ -72,7 +72,7 @@ translation_2_list = []
 
 
 # Loop with step size of n to skip rows between poses
-n = 2
+n = 40
 for i in range(len(time) - n):  # Ensure the loop doesn't go out of bounds
     quat1 = q1[i]
     quat2 = q2[i]
@@ -107,7 +107,7 @@ for i in range(len(time) - n):  # Ensure the loop doesn't go out of bounds
     
 
 # create a list with only every nn-th element, when plotting computer says no :D 
-nn = 50
+nn = 40
 
 axis_list_small = axis_list[::nn]
 position_list_small = position_list[::nn]
@@ -129,7 +129,7 @@ for i in range(len(axis_list_small)):
     
     # Start and end points of the finite helical axis
     start = position
-    end = position + axis * axis_scale  # Extend the axis for visualization
+    end = position + axis * -axis_scale  # Extend the axis for visualization
 
     ax.plot([start[0], end[0]], [start[1], end[1]], [start[2], end[2]], 'r-')
     
