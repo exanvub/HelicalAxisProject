@@ -9,14 +9,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.spatial.transform import Rotation as R
+import math
 
 plt.close('all')
 
 
 #%% Data reading
 
-# data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
-data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
+data = pd.read_csv('../test_data/Polhemus_test_data/1_90deg_ydata.csv')
 
 
 # Extract relevant data
@@ -173,102 +173,172 @@ translation_1_list = []
 translation_2_list = []
 
 # Traditional method
-# for i in range(len(Trel)-1):
-#     phi, n, t, s = calculate_FHA(Trel[i], Trel[i+1])
+for i in range(len(Trel)-1):
+    phi, n, t, s = calculate_FHA(Trel[i], Trel[i+1])
+    hax.append(n)
+    # ang.append(phi)
+    ang.append(math.degrees(phi))
+    svec.append(s)
+    d.append(t)
+    
+    translation_1_list.append(loc1[i])
+    translation_2_list.append(loc2[i])
+
+# Incremental method (time-based)
+# incr=5
+# for i in range(len(time)-incr):
+#     phi, n, t, s = calculate_FHA(Trel[i], Trel[i+incr])
 #     hax.append(n)
-#     ang.append(phi)
+#     # ang.append(phi)
+#     ang.append(math.degrees(phi))
 #     svec.append(s)
 #     d.append(t)
     
 #     translation_1_list.append(loc1[i])
 #     translation_2_list.append(loc2[i])
 
-# Incremental method (time-based for now)
-incr=5
-for i in range(len(time)-incr):
-    phi, n, t, s = calculate_FHA(Trel[i], Trel[i+incr])
-    hax.append(n)
-    ang.append(phi)
-    svec.append(s)
-    d.append(t)
-    
-    translation_1_list.append(loc1[i])
-    translation_2_list.append(loc2[i])
- 
+# Angles step
+step = 5
+angSum = 0
+ind_step = []
+ind_step.append(0)
+for i in range(len(ang)):
+    angSum = 0
+    angSum += ang[i]
+    if(angSum > step):
+        ind_step.append(i)
+
+hax_step = []
+ang_step = []
+svec_step = []
+d_step = []
+for i in range(1, len(ind_step)):
+    phi, n, t, s = calculate_FHA(Trel[ind_step[i-1]], Trel[ind_step[i]])
+    hax_step.append(n)
+    # ang_step.append(phi)
+    ang_step.append(math.degrees(phi))
+    svec_step.append(s)
+    d_step.append(t)
+
+# Incremental method (angle-based)
+step = 10
+angSum = 0
+ind_incr = []
+for i in range(len(ang)-1):
+    angSum = 0
+    for j in range(i, len(ang)):
+        angSum += ang[j]
+        if (angSum > step):
+            ind_incr.append([i, j])
+            break
+        
+        
+        
+hax_incr = []
+ang_incr = []
+svec_incr = []
+d_incr = []
+for i in range(1, len(ind_incr)):
+    phi, n, t, s = calculate_FHA(Trel[ind_incr[i][0]], Trel[ind_incr[i][1]])
+    hax_incr.append(n)
+    # ang_incr.append(phi)
+    ang_incr.append(math.degrees(phi))
+    svec_incr.append(s)
+    d_incr.append(t)
+
     
 #%% Plotting 
-
-#transform into sensor1 reference system for plotting
-R1=[]
-for i in range(len(T1)):
-    ROT,v = decompose_homogeneous_matrix(T1[i])
-    R1.append(ROT)
-R1=np.array(R1)
-
-transformed_hax = []
-transformed_svec = []
-for i in range(len(hax)):
-    transformed_hax.append(np.dot(hax[i], R1[i]))
-    transformed_svec.append(np.dot(T1[i], np.append(svec[i], 1).transpose()))
-
-
-#reduce data dimensionality for plotting (1 sample every nn)
 nn = 25
 
-hax_small = hax[::nn]
-svec_small = svec[::nn]
-d_small = d[::nn]
-
-transformed_hax_small = transformed_hax[::nn]
-transformed_svec_small = transformed_svec[::nn]
-
-translation_1_list_small = translation_1_list[::nn]
-translation_2_list_small = translation_2_list[::nn]
-
-
-#plot
-fig = plt.figure()
-axis_scale = 20  
-ax = fig.add_subplot(111, projection='3d') 
-
-
-for i in range(len(hax_small)):
-    p = transformed_svec_small[i][0:3] + d_small[i]*transformed_hax_small[i]
+def plot_fha(nn, fig, ind, T1, hax, svec, d, t1, t2, reduce):
+    #transform into sensor1 reference system for plotting
+    R1=[]
+    for i in range(len(ind)):
+        ROT,v = decompose_homogeneous_matrix(T1[ind[i]])
+        R1.append(ROT)
+    R1=np.array(R1)
     
-    start = p 
-    end = p + transformed_hax_small[i]*axis_scale
+    transformed_hax = []
+    transformed_svec = []
+    for i in range(len(hax)):
+        transformed_hax.append(np.dot(hax[i], R1[i]))
+        transformed_svec.append(np.dot(T1[i], np.append(svec[i], 1).transpose()))
     
-    ax.plot([start[0], end[0]], [start[1], end[1]], [start[2], end[2]], 'r-')
-    ax.scatter(p[0], p[1], p[2], color='b', s=5)
+    if (reduce == True):
+        #reduce data dimensionality for plotting (1 sample every nn)
+        hax_small = hax[::nn]
+        svec_small = svec[::nn]
+        d_small = d[::nn]
+        
+        transformed_hax_small = transformed_hax[::nn]
+        transformed_svec_small = transformed_svec[::nn]
+        
+    else:
+        hax_small = hax
+        svec_small = svec
+        d_small = d
+        
+        transformed_hax_small = transformed_hax
+        transformed_svec_small = transformed_svec
+        
+    translation_1_list_small = translation_1_list[::nn]
+    translation_2_list_small = translation_2_list[::nn]
+        
     
-    ax.scatter(translation_1_list_small[i][0], translation_1_list_small[i][1], translation_1_list_small[i][2], color='k')
-    ax.scatter(translation_2_list_small[i][0], translation_2_list_small[i][1], translation_2_list_small[i][2], color='g')
+    #plot
+    # fig = plt.figure()
+    axis_scale = 20  
+    ax = fig.add_subplot(111, projection='3d') 
     
-ax.scatter(translation_2_list_small[0][0], translation_2_list_small[0][1], translation_2_list_small[0][2], color='k', s=50) 
+    
+    for i in range(len(hax_small)):
+        p = transformed_svec_small[i][0:3] + d_small[i]*transformed_hax_small[i]
+        
+        start = p 
+        end = p + transformed_hax_small[i]*axis_scale
+        
+        pl = ax.plot([start[0], end[0]], [start[1], end[1]], [start[2], end[2]], 'r-')
+        sc1 = ax.scatter(p[0], p[1], p[2], color='b', s=5)    
+        
+    for i in range(len(translation_1_list_small)):    
+        sc2 = ax.scatter(translation_1_list_small[i][0], translation_1_list_small[i][1], translation_1_list_small[i][2], color='k')
+        sc3 = ax.scatter(translation_2_list_small[i][0], translation_2_list_small[i][1], translation_2_list_small[i][2], color='g')
+        
+    ax.scatter(translation_2_list_small[0][0], translation_2_list_small[0][1], translation_2_list_small[0][2], color='k', s=50) 
+    
+    #this is to align the plotting reference frame with the Polhemus transmitter reference frame (needed if data were acquired using the default reference system)
+    ax.view_init(elev=180) 
+       
+    
+    # Equal axis scaling
+    x_limits = ax.get_xlim3d()
+    y_limits = ax.get_ylim3d()
+    z_limits = ax.get_zlim3d()
+    
+    max_range = np.array([x_limits[1] - x_limits[0], y_limits[1] - y_limits[0], z_limits[1] - z_limits[0]]).max() / 4.0
+    
+    mid_x = (x_limits[1] + x_limits[0]) * 0.5
+    mid_y = (y_limits[1] + y_limits[0]) * 0.5
+    mid_z = (z_limits[1] + z_limits[0]) * 0.5
+    
+    ax.set_xlim3d([mid_x - max_range, mid_x + max_range])
+    ax.set_ylim3d([mid_y - max_range, mid_y + max_range])
+    ax.set_zlim3d([mid_z - max_range, mid_z + max_range])    
+    
+    
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    # ax.legend(pl, 'FHA')
+    ax.legend([pl, sc1, sc2, sc3], ['FHA', 'FHA Position', 'Sensor 1', 'Sensor 2'])
 
-#this is to align the plotting reference frame with the Polhemus transmitter reference frame (needed if data were acquired using the default reference system)
-ax.view_init(elev=180) 
-   
+fig1 = plt.figure()
+plot_fha(nn, fig1, np.linspace(0,len(T1)-1,len(T1)).astype(int), T1, hax, svec, d, translation_1_list, translation_2_list, True)
 
-# Equal axis scaling
-x_limits = ax.get_xlim3d()
-y_limits = ax.get_ylim3d()
-z_limits = ax.get_zlim3d()
+fig2 = plt.figure()
+plot_fha(nn, fig2, ind_step, T1, hax_step, svec_step, d_step, translation_1_list, translation_2_list, False)
 
-max_range = np.array([x_limits[1] - x_limits[0], y_limits[1] - y_limits[0], z_limits[1] - z_limits[0]]).max() / 4.0
-
-mid_x = (x_limits[1] + x_limits[0]) * 0.5
-mid_y = (y_limits[1] + y_limits[0]) * 0.5
-mid_z = (z_limits[1] + z_limits[0]) * 0.5
-
-ax.set_xlim3d([mid_x - max_range, mid_x + max_range])
-ax.set_ylim3d([mid_y - max_range, mid_y + max_range])
-ax.set_zlim3d([mid_z - max_range, mid_z + max_range])    
-
-
-ax.set_xlabel('X')
-ax.set_ylabel('Y')
-ax.set_zlabel('Z')
-ax.legend(['FHA', 'FHA Position', 'Sensor 1', 'Sensor 2'])
+fig3 = plt.figure()
+plot_fha(nn, fig3, [item[0] for item in ind_incr], T1, hax_incr, svec_incr, d_incr, translation_1_list, translation_2_list, True)
 
 plt.show()
