@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Oct 25 10:21:23 2024
-
-@author: Matteo Iurato
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -12,12 +5,7 @@ from scipy.spatial.transform import Rotation as R
 
 plt.close('all')
 
-
-#%% Data reading
-
-# data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
 data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
-
 
 # Extract relevant data
 time = data['Time'].values
@@ -26,38 +14,13 @@ q2 = data[['w2', 'x2', 'y2', 'z2']].values
 loc1 = data[['loc1_x', 'loc1_y', 'loc1_z']].values
 loc2 = data[['loc2_x', 'loc2_y', 'loc2_z']].values
 
-
-# Use following lines if you want to cut the beginning and end of the acquisition
-# This might be necessary because stationary conditions (no movement) introduce high error in the FHA position calculation
-# due to very small difference between one timeframe and the subsequent
-
-# cut1=500
-# cut2=1900
+# cut1=1500
+# cut2=2800
 # q1=q1[cut1:cut2]
 # q2=q2[cut1:cut2]
 # loc1=loc1[cut1:cut2]
 # loc2=loc2[cut1:cut2]
 # time=time[cut1:cut2]
-
-#%% Quaternion to rotation matrix conversion
-
-# Manual implementation of quaternion to rotation matrix conversion
-# def quaternion_to_rotation_matrix(w, x, y, z):
-#     r11 = pow(w, 2) + pow(x, 2) - pow(y, 2) - pow(z, 2)
-#     r12 = 2*x*y - 2*w*z
-#     r13 = 2*x*y+2*w*y
-#     r21 = 2*x*y+2*w*z
-#     r22 = pow(w, 2) - pow(x, 2) + pow(y, 2) - pow(z, 2)
-#     r23 = 2*y*z - 2*w*x
-#     r31 = 2*x*z - 2*w*y
-#     r32 = 2*y*z + 2*w*z
-#     r33 = pow(w, 2) - pow(x, 2) - pow(y, 2) + pow(z, 2)
-    
-#     ROT = np.matrix([[r11, r12, r13],
-#                     [r21, r22, r23],
-#                     [r31, r32, r33]])
-    
-#     return ROT
 
 # Scipy quaternion to rotation matrix convertion
 def quaternion_to_rotation_matrix(quaternion):
@@ -70,16 +33,9 @@ R1 = []
 R2 = []
 for i in range(len(q1)):
     
-    # Use this if you rely on manual conversion
-    # R1.append(quaternion_to_rotation_matrix(q1[i][0], q1[i][1], q1[i][2], q1[i][3]))
-    # R2.append(quaternion_to_rotation_matrix(q2[i][0], q2[i][1], q2[i][2], q2[i][3]))
-    
     # Use this if you rely on scipy conversion
     R1.append(quaternion_to_rotation_matrix(q1[i]))
     R2.append(quaternion_to_rotation_matrix(q2[i]))
-
-
-#%% Homogeneous matrices building
 
 def build_homogeneous_matrix(R, locx, locy, locz):
     T = np.matrix([[R[0,0], R[0,1], R[0,2], locx],
@@ -107,7 +63,6 @@ for i in range(len(T1)):
 
 T1inv = np.array(T1inv)
     
-
 Trel = []
 for i in range(len(T1inv)):
     # Note: we pre-multiply Tinv, meaning an EXTRINSIC rotation 
@@ -117,8 +72,6 @@ for i in range(len(T1inv)):
 
 Trel=np.array(Trel)
 
-
-#%% Calculate FHA    
 def decompose_homogeneous_matrix(H):
     Horig = np.array(H)
     R = Horig[0:3,0:3]
@@ -172,7 +125,7 @@ d = []
 translation_1_list = []
 translation_2_list = []
 
-# Traditional method
+# # Traditional method
 # for i in range(len(Trel)-1):
 #     phi, n, t, s = calculate_FHA(Trel[i], Trel[i+1])
 #     hax.append(n)
@@ -184,7 +137,7 @@ translation_2_list = []
 #     translation_2_list.append(loc2[i])
 
 # Incremental method (time-based for now)
-incr=5
+incr=20
 for i in range(len(time)-incr):
     phi, n, t, s = calculate_FHA(Trel[i], Trel[i+incr])
     hax.append(n)
@@ -194,9 +147,7 @@ for i in range(len(time)-incr):
     
     translation_1_list.append(loc1[i])
     translation_2_list.append(loc2[i])
- 
-    
-#%% Plotting 
+
 
 #transform into sensor1 reference system for plotting
 R1=[]
@@ -207,17 +158,23 @@ R1=np.array(R1)
 
 transformed_hax = []
 transformed_svec = []
+
 for i in range(len(hax)):
     transformed_hax.append(np.dot(hax[i], R1[i]))
     transformed_svec.append(np.dot(T1[i], np.append(svec[i], 1).transpose()))
 
+p = []
+for i in range(len(hax)):
+    p.append(transformed_svec[i][0:3] + d[i]*transformed_hax[i])
 
 #reduce data dimensionality for plotting (1 sample every nn)
-nn = 25
+nn = 50
 
 hax_small = hax[::nn]
 svec_small = svec[::nn]
 d_small = d[::nn]
+
+p_small = p[::nn]
 
 transformed_hax_small = transformed_hax[::nn]
 transformed_svec_small = transformed_svec[::nn]
@@ -225,21 +182,108 @@ transformed_svec_small = transformed_svec[::nn]
 translation_1_list_small = translation_1_list[::nn]
 translation_2_list_small = translation_2_list[::nn]
 
+##### AHA calculation #####
+
+# average direction vector (mean of unit vectors)
+hax_array = np.array(hax)
+average_hax = np.mean(hax_array, axis=0)
+average_hax = average_hax / np.linalg.norm(average_hax)  # Normalize
+
+# average position of the FHA points
+svec_array = np.array(svec)
+average_position = np.mean(svec_array, axis=0)
+
+d_array = np.array(d)
+average_d = np.mean(d_array, axis=0)
+
+average_p = average_position + average_d * average_hax
+
+# Extend the AHA line for plotting
+axis_scale = 20  # Adjust scale for visualization
+average_start = average_p
+average_end = average_start + axis_scale * average_hax
+
+# Transform average_position into Sensor 1's reference system
+average_p_homogeneous = np.append(average_p, 1)  # Make it homogeneous (x, y, z, 1)
+
+# Apply the transformation using T1[0] (or the initial transformation of Sensor 1)
+transformed_average_p = np.dot(T1[0], average_p_homogeneous)
+
+# Extract the transformed (x, y, z) coordinates
+transformed_average_p = transformed_average_p[:3]
+
+# Adjust the start and end of the AHA for plotting in Sensor 1's reference system
+transformed_average_start = transformed_average_p
+transformed_average_end = transformed_average_start + axis_scale * average_hax
+
+
+# Calculate the midpoint of the AHA
+midpoint = (transformed_average_start + transformed_average_end) / 2
+
+# # Define the dimensions of the rectangular plane
+# plane_width = 5   # Width of the plane along one axis
+# plane_height = 5  # Height of the plane along the other axis
+# plane_resolution = 10  # Number of points along each axis of the plane
+
+# # Create a grid of points for the rectangular plane
+# x_points = np.linspace(-plane_width / 2, plane_width / 2, plane_resolution)
+# y_points = np.linspace(-plane_height / 2, plane_height / 2, plane_resolution)
+# xx, yy = np.meshgrid(x_points, y_points)
+# # Normal vector is the AHA direction
+# normal = average_hax
+# normal = normal / np.linalg.norm(normal)  # Ensure it's normalized
+
+# # Use the plane equation: n · (x - p) = 0
+# # Solve for z to get points on the plane
+# zz = (-normal[0] * xx - normal[1] * yy) / normal[2]
+
+# # Shift the plane to be centered around the midpoint
+# xx += midpoint[0]
+# yy += midpoint[1]
+# zz += midpoint[2]
+
+# Define the plane size and resolution
+plane_size = 10  # Half the size of the square plane (adjust for visualization)
+plane_resolution = 10  # Number of points along each axis of the plane
+
+# Normal vector is the AHA direction
+normal = average_hax / np.linalg.norm(average_hax)  # Ensure the normal vector is normalized
+
+# Create two orthogonal vectors to the normal to define the plane's basis
+# Start with any vector not parallel to the normal
+arbitrary_vector = np.array([1, 0, 0]) if abs(normal[0]) < 0.9 else np.array([0, 1, 0])
+
+# Compute the first orthogonal vector
+orthogonal1 = np.cross(normal, arbitrary_vector)
+orthogonal1 = orthogonal1 / np.linalg.norm(orthogonal1)  # Normalize
+
+# Compute the second orthogonal vector
+orthogonal2 = np.cross(normal, orthogonal1)
+orthogonal2 = orthogonal2 / np.linalg.norm(orthogonal2)  # Normalize
+
+# Create a grid of points in the local plane coordinate system
+u = np.linspace(-plane_size, plane_size, plane_resolution)
+v = np.linspace(-plane_size, plane_size, plane_resolution)
+uu, vv = np.meshgrid(u, v)
+
+# Map the grid onto the plane using the orthogonal basis vectors
+xx = midpoint[0] + uu * orthogonal1[0] + vv * orthogonal2[0]
+yy = midpoint[1] + uu * orthogonal1[1] + vv * orthogonal2[1]
+zz = midpoint[2] + uu * orthogonal1[2] + vv * orthogonal2[2]
+
 
 #plot
 fig = plt.figure()
 axis_scale = 20  
 ax = fig.add_subplot(111, projection='3d') 
 
-
 for i in range(len(hax_small)):
-    p = transformed_svec_small[i][0:3] + d_small[i]*transformed_hax_small[i]
-    
-    start = p 
-    end = p + transformed_hax_small[i]*axis_scale
+
+    start = p_small[i]
+    end = p_small[i] + transformed_hax_small[i]*axis_scale
     
     ax.plot([start[0], end[0]], [start[1], end[1]], [start[2], end[2]], 'r-')
-    ax.scatter(p[0], p[1], p[2], color='b', s=5)
+    ax.scatter(p_small[i][0], p_small[i][1], p_small[i][2], color='b', s=5)
     
     ax.scatter(translation_1_list_small[i][0], translation_1_list_small[i][1], translation_1_list_small[i][2], color='k')
     ax.scatter(translation_2_list_small[i][0], translation_2_list_small[i][1], translation_2_list_small[i][2], color='g')
@@ -248,7 +292,22 @@ ax.scatter(translation_2_list_small[0][0], translation_2_list_small[0][1], trans
 
 #this is to align the plotting reference frame with the Polhemus transmitter reference frame (needed if data were acquired using the default reference system)
 ax.view_init(elev=180) 
-   
+
+# Add the transformed average helical axis to the plot
+ax.plot([transformed_average_start[0], transformed_average_end[0]],
+        [transformed_average_start[1], transformed_average_end[1]],
+        [transformed_average_start[2], transformed_average_end[2]], 'b-', linewidth=2, label='Average Helical Axis')
+
+ax.scatter(transformed_average_start[0], transformed_average_start[1], transformed_average_start[2], color='b', s=100, label='AHA Position')
+
+ax.scatter(midpoint[0], midpoint[1], midpoint[2], color='r', s=100, label='Perpendicular Plane Midpoint')
+
+ax.plot_surface(xx, yy, zz, alpha=0.5, color='cyan', edgecolor='none', label='Perpendicular Plane')
+
+
+# Update the legend to include the plane
+ax.legend(['FHA', 'FHA Position', 'Sensor 1', 'Sensor 2', 'AHA', 'Perpendicular Plane'])
+
 
 # Equal axis scaling
 x_limits = ax.get_xlim3d()
