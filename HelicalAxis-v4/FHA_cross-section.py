@@ -1,11 +1,14 @@
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.spatial.transform import Rotation as R
+import math
 
 plt.close('all')
 
 data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
+data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
 
 # Extract relevant data
 time = data['Time'].values
@@ -14,13 +17,13 @@ q2 = data[['w2', 'x2', 'y2', 'z2']].values
 loc1 = data[['loc1_x', 'loc1_y', 'loc1_z']].values
 loc2 = data[['loc2_x', 'loc2_y', 'loc2_z']].values
 
-# cut1=1500
-# cut2=2800
-# q1=q1[cut1:cut2]
-# q2=q2[cut1:cut2]
-# loc1=loc1[cut1:cut2]
-# loc2=loc2[cut1:cut2]
-# time=time[cut1:cut2]
+cut1=20
+cut2=1500
+q1=q1[cut1:cut2]
+q2=q2[cut1:cut2]
+loc1=loc1[cut1:cut2]
+loc2=loc2[cut1:cut2]
+time=time[cut1:cut2]
 
 # Scipy quaternion to rotation matrix convertion
 def quaternion_to_rotation_matrix(quaternion):
@@ -55,8 +58,6 @@ for i in range(len(R1)):
 T1 = np.array(T1)
 T2 = np.array(T2)
     
-#%% Calculate relative homogenous matrix
-
 T1inv=[]
 for i in range(len(T1)):
     T1inv.append(np.linalg.inv(T1[i]))
@@ -115,7 +116,15 @@ def calculate_FHA(T1, T2):
     s = np.cross(-0.5*n, np.cross(n, v)) + np.cross((np.sin(phi)/(2*(1-np.cos(phi))))*n, v)
     
     return phi, n, t, s
-    
+
+all_hax = []
+all_angles = []
+all_svec = []
+all_d = []
+
+all_translation_1_list = []
+all_translation_2_list = []
+
 
 hax = []
 ang = []
@@ -125,28 +134,101 @@ d = []
 translation_1_list = []
 translation_2_list = []
 
-# # Traditional method
-# for i in range(len(Trel)-1):
-#     phi, n, t, s = calculate_FHA(Trel[i], Trel[i+1])
-#     hax.append(n)
-#     ang.append(phi)
-#     svec.append(s)
-#     d.append(t)
-    
-#     translation_1_list.append(loc1[i])
-#     translation_2_list.append(loc2[i])
+# Calculate all helical axis:
+for i in range(len(Trel)-1):
+    phi, n, t, s = calculate_FHA(Trel[i], Trel[i+1])
+    all_hax.append(n)
+    # ang.append(phi)
+    # all_angles.append(phi)
+    all_angles.append(math.degrees(phi))
 
-# Incremental method (time-based for now)
-incr=20
-for i in range(len(time)-incr):
-    phi, n, t, s = calculate_FHA(Trel[i], Trel[i+incr])
-    hax.append(n)
-    ang.append(phi)
-    svec.append(s)
-    d.append(t)
+
+    all_svec.append(s)
+    all_d.append(t)
     
-    translation_1_list.append(loc1[i])
-    translation_2_list.append(loc2[i])
+    all_translation_1_list.append(loc1[i])
+    all_translation_2_list.append(loc2[i])
+
+def activate_method(method_type, time, Trel, loc1, loc2, all_angles):
+    hax, ang, svec, d, translation_1_list, translation_2_list = [], [], [], [], [], []
+    if method_type == 'all_FHA':
+        hax = all_hax
+        ang = all_angles
+        svec = all_svec
+        d = all_d
+
+        translation_1_list = all_translation_1_list
+        translation_2_list = all_translation_2_list
+
+    elif method_type == 'incremental_time':
+        # Incremental method (time-based)
+        incr = 20
+        for i in range(len(time) - incr):
+            phi, n, t, s = calculate_FHA(Trel[i], Trel[i + incr])
+            hax.append(n)
+            ang.append(phi)
+            svec.append(s)
+            d.append(t)
+            
+            translation_1_list.append(loc1[i])
+            translation_2_list.append(loc2[i])
+    
+    elif method_type == 'incremental_step':
+        # Incremental method (step-based)
+        step = 5
+        angSum = 0
+        ind_step = [0]
+        for i in range(len(all_angles)):
+            angSum += all_angles[i]
+            if angSum > step:
+                ind_step.append(i)
+                angSum = 0  # Reset only after adding an index
+
+        for i in range(1, len(ind_step)):
+            phi, n, t, s = calculate_FHA(Trel[ind_step[i-1]], Trel[ind_step[i]])
+            hax.append(n)
+            ang.append(math.degrees(phi))  # Assuming you want the angle in degrees
+            svec.append(s)
+            d.append(t)
+
+            translation_1_list.append(loc1[ind_step[i-1]])
+            translation_2_list.append(loc2[ind_step[i-1]])
+
+    elif method_type == 'incremental_angle':
+        # Incremental method (angle-based)
+        step = 10
+        angSum = 0
+        ind_incr = []
+        for i in range(len(all_angles) - 1):
+            angSum = 0
+            for j in range(i, len(all_angles)):
+                angSum += all_angles[j]
+                if angSum > step:
+                    ind_incr.append([i, j])
+                    break
+
+        for i in range(1, len(ind_incr)):
+            phi, n, t, s = calculate_FHA(Trel[ind_incr[i][0]], Trel[ind_incr[i][1]])
+            hax.append(n)
+            ang.append(phi)
+            svec.append(s)
+            d.append(t)
+
+            translation_1_list.append(loc1[ind_incr[i][0]])
+            translation_2_list.append(loc2[ind_incr[i][0]])
+
+    else:
+        raise ValueError("Invalid method type. Choose from 'incremental_time', 'incremental_step', or 'incremental_angle'.")
+    
+    return hax, ang, svec, d, translation_1_list, translation_2_list
+
+
+# method_type = 'all_FHA'
+# method_type = 'incremental_time' 
+# method_type = 'incremental_step'
+method_type = 'incremental_angle'
+
+hax, ang, svec, d, translation_1_list, translation_2_list = activate_method(method_type, time, Trel, loc1, loc2, all_angles)
 
 
 #transform into sensor1 reference system for plotting
@@ -323,9 +405,9 @@ ax.plot([transformed_average_start[0], transformed_average_end[0]],
         [transformed_average_start[1], transformed_average_end[1]],
         [transformed_average_start[2], transformed_average_end[2]], 'b-', linewidth=2, label='Average Helical Axis')
 
-ax.scatter(transformed_average_start[0], transformed_average_start[1], transformed_average_start[2], color='b', s=100, label='AHA Position')
+ax.scatter(transformed_average_start[0], transformed_average_start[1], transformed_average_start[2], color='b', s=50, label='AHA Position')
 
-ax.scatter(midpoint[0], midpoint[1], midpoint[2], color='r', s=100, label='Perpendicular Plane Midpoint')
+ax.scatter(midpoint[0], midpoint[1], midpoint[2], color='r', s=50, label='Perpendicular Plane Midpoint')
 
 ax.plot_surface(xx, yy, zz, alpha=0.5, color='cyan', edgecolor='none', label='Perpendicular Plane')
 
@@ -333,8 +415,6 @@ ax.plot_surface(xx, yy, zz, alpha=0.5, color='cyan', edgecolor='none', label='Pe
 
 # Plot intersection points
 ax.scatter(intersections_points_small[:, 0], intersections_points_small[:, 1], intersections_points_small[:, 2], color='magenta', label='Intersections')
-
-
 
 # Equal axis scaling
 x_limits = ax.get_xlim3d()
@@ -358,8 +438,6 @@ ax.set_zlabel('Z')
 
 
 plt.show()
-
-
 
 # Transform the points to the plane's local coordinate system
 plane_points_2d = []
@@ -387,3 +465,5 @@ plt.ylabel('V (Plane Axis 2)')
 plt.title('FHA Intersection Points in Plane Coordinate System')
 plt.legend()
 plt.show()
+
+# %%
