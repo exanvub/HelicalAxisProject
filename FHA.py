@@ -8,8 +8,10 @@ import math
 plt.close('all')
 
 #### Load data ####
-# data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
-data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
+data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
+# data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
+# data= pd.read_csv('test_data/Polhemus_test_data/11_Head_rotation_2data.csv')
+
 
 #### Choose method type ####
 # method_type = 'all_FHA'
@@ -29,7 +31,7 @@ elif method_type == 'step_angle':
     step = 2 # amount of degrees to skip
     nn = 1
 elif method_type == 'incremental_angle':
-    step = 2 # amount of degrees to increment
+    step = 6 # amount of degrees to increment
     nn = 20
 
 # Extract relevant data
@@ -40,8 +42,8 @@ loc1 = data[['loc1_x', 'loc1_y', 'loc1_z']].values
 loc2 = data[['loc2_x', 'loc2_y', 'loc2_z']].values
 
 ###### Choose the range of data ######
-cut1=20
-cut2=1500
+cut1=200
+cut2=1200
 q1=q1[cut1:cut2]
 q2=q2[cut1:cut2]
 loc1=loc1[cut1:cut2]
@@ -287,49 +289,21 @@ elif method_type == 'incremental_angle':
 
 ##### AHA calculation #####
 
-# average direction vector (mean of unit vectors)
-hax_array = np.array(hax)
-average_hax = np.mean(hax_array, axis=0)
-average_hax = average_hax / np.linalg.norm(average_hax)  # Normalize
+axis_scale = 20  # Adjust scale for visualization
 
-# average position of the FHA points
-svec_array = np.array(svec)
-average_svec = np.mean(svec_array, axis=0)
+transformed_average_hax = np.mean(transformed_hax, axis=0)
+transformed_average_hax = transformed_average_hax / np.linalg.norm(transformed_average_hax)  # Normalize
 
-d_array = np.array(d)
-average_d = np.mean(d_array, axis=0)
+transformed_average_svec = np.mean(transformed_svec, axis=0)
+transformed_average_svec = transformed_average_svec[:3]
 
-average_p = average_svec + average_d * average_hax
+average_d = np.mean(d, axis=0)
+
+transformed_average_p = transformed_average_svec + average_d * transformed_average_hax
 
 # Extend the AHA line for plotting
-axis_scale = 20  # Adjust scale for visualization
-average_start = average_p
-average_end = average_start + axis_scale * average_hax
-
-# Transform average_position into Sensor 1's reference system
-average_p_homogeneous = np.append(average_p, 1)  # Make it homogeneous (x, y, z, 1)
-
-# Apply the transformation using T1 (or the initial transformation of Sensor 1)
-if method_type == 'all_FHA':
-    # all_FHA
-    transformed_average_p = np.dot(T1[0], average_p_homogeneous)
-elif method_type == 'incremental_time':
-    # incremental_time
-    transformed_average_p = np.dot(T1[0], average_p_homogeneous)
-elif method_type == 'step_angle':
-    # incremental_step
-    transformed_average_p = np.dot(T1[ind_step[0]], average_p_homogeneous)
-elif method_type == 'incremental_angle':
-    # incremental_angle
-    transformed_average_p = np.dot(T1[ind_incr[0][0]], average_p_homogeneous)
-
-
-# Extract the transformed (x, y, z) coordinates
-transformed_average_p = transformed_average_p[:3]
-
-# Adjust the start and end of the AHA for plotting in Sensor 1's reference system
 transformed_average_start = transformed_average_p
-transformed_average_end = transformed_average_start + axis_scale * average_hax
+transformed_average_end = transformed_average_start + axis_scale * transformed_average_hax
 
 # Calculate the midpoint of the AHA
 midpoint = (transformed_average_start + transformed_average_end) / 2
@@ -339,7 +313,7 @@ plane_size = 10  # Half the size of the square plane (adjust for visualization)
 plane_resolution = 10  # Number of points along each axis of the plane
 
 # Normal vector is the AHA direction
-normal = average_hax / np.linalg.norm(average_hax)  # Ensure the normal vector is normalized
+normal = transformed_average_hax/np.linalg.norm(transformed_average_hax)
 
 # Create two orthogonal vectors to the normal to define the plane's basis
 # Start with any vector not parallel to the normal
@@ -441,7 +415,7 @@ for i in range(len(hax_small)):
     ax.scatter(translation_1_list_small[i][0], translation_1_list_small[i][1], translation_1_list_small[i][2], color='k')
     ax.scatter(translation_2_list_small[i][0], translation_2_list_small[i][1], translation_2_list_small[i][2], color='g')
     
-ax.scatter(translation_2_list_small[0][0], translation_2_list_small[0][1], translation_2_list_small[0][2], color='k', s=50) 
+ax.scatter(translation_2_list_small[0][0], translation_2_list_small[0][1], translation_2_list_small[0][2], color='k', s=10) 
 
 #this is to align the plotting reference frame with the Polhemus transmitter reference frame (needed if data were acquired using the default reference system)
 ax.view_init(elev=180) 
@@ -451,9 +425,9 @@ ax.plot([transformed_average_start[0], transformed_average_end[0]],
         [transformed_average_start[1], transformed_average_end[1]],
         [transformed_average_start[2], transformed_average_end[2]], 'b-', linewidth=2, label='Average Helical Axis')
 
-ax.scatter(transformed_average_start[0], transformed_average_start[1], transformed_average_start[2], color='b', s=50, label='AHA Position')
+ax.scatter(transformed_average_start[0], transformed_average_start[1], transformed_average_start[2], color='b', s=10, label='AHA Position')
 
-ax.scatter(midpoint[0], midpoint[1], midpoint[2], color='r', s=50, label='Perpendicular Plane Midpoint')
+ax.scatter(midpoint[0], midpoint[1], midpoint[2], color='r', s=10, label='Perpendicular Plane Midpoint')
 
 ax.plot_surface(xx, yy, zz, alpha=0.5, color='cyan', edgecolor='none', label='Perpendicular Plane')
 
