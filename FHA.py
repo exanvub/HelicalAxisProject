@@ -8,8 +8,9 @@ import math
 plt.close('all')
 
 #### Load data ####
-data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
-# data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
+# data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
+data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
+# data = pd.read_csv('test_data/Polhemus_test_data/4_90deg_y_with_xxdeg_z_rotationdata.csv')
 # data= pd.read_csv('test_data/Polhemus_test_data/11_Head_rotation_2data.csv')
 
 
@@ -31,7 +32,7 @@ elif method_type == 'step_angle':
     step = 2 # amount of degrees to skip
     nn = 1
 elif method_type == 'incremental_angle':
-    step = 6 # amount of degrees to increment
+    step = 2 # amount of degrees to increment
     nn = 20
 
 # Extract relevant data
@@ -42,8 +43,8 @@ loc1 = data[['loc1_x', 'loc1_y', 'loc1_z']].values
 loc2 = data[['loc2_x', 'loc2_y', 'loc2_z']].values
 
 ###### Choose the range of data ######
-cut1=200
-cut2=1200
+cut1=600
+cut2=1800
 q1=q1[cut1:cut2]
 q2=q2[cut1:cut2]
 loc1=loc1[cut1:cut2]
