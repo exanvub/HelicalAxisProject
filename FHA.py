@@ -8,17 +8,17 @@ import math
 plt.close('all')
 
 #### Load data ####
-# data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
-data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
+data = pd.read_csv('test_data/Polhemus_test_data/1_90deg_ydata_oneway.csv')
+# data = pd.read_csv('test_data/Polhemus_test_data/3_90deg_y_with_xxdeg_x_rotationdata.csv')
 # data = pd.read_csv('test_data/Polhemus_test_data/4_90deg_y_with_xxdeg_z_rotationdata.csv')
 # data= pd.read_csv('test_data/Polhemus_test_data/11_Head_rotation_2data.csv')
 
 
 #### Choose method type ####
-# method_type = 'all_FHA'
+method_type = 'all_FHA'
 # method_type = 'incremental_time' 
 # method_type = 'step_angle'
-method_type = 'incremental_angle'
+# method_type = 'incremental_angle'
 
 
 ##### Define value of steps and the number of samples to skip for plotting #####
@@ -338,6 +338,23 @@ xx = midpoint[0] + uu * orthogonal1[0] + vv * orthogonal2[0]
 yy = midpoint[1] + uu * orthogonal1[1] + vv * orthogonal2[1]
 zz = midpoint[2] + uu * orthogonal1[2] + vv * orthogonal2[2]
 
+########## Calculate angles between each FHA and the average helical axis ###############
+
+# Normalize each helical axis
+normalized_hax = transformed_hax / np.linalg.norm(transformed_hax, axis=1)[:, None]
+
+# Compute angles with the average helical axis
+dot_products = np.dot(normalized_hax, transformed_average_hax)  # Dot product with AHA
+# dot_products = np.clip(dot_products, -1.0, 1.0)  # Clip to avoid numerical errors outside valid range
+angles_radians = np.arccos(dot_products)  # Angle in radians
+angles_degrees = np.degrees(angles_radians)  # Convert to degrees
+
+# Print or use the calculated angles
+print("Angles (degrees):", angles_degrees)
+
+# calculate the average angle between the FHA and the AHA
+average_angle = np.mean(angles_degrees)
+print("Average angle (degrees):", average_angle)
 
 def calculate_intersection(fha_origin, fha_direction, plane_point, plane_normal):
     """
