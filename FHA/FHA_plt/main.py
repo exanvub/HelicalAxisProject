@@ -1,6 +1,6 @@
 import polhemus_import as pi
 import vicon_import as vi
-import FHA_visualizer as fhav
+import FHA_visualizer_plt as fhav
 import config
 
 def main():

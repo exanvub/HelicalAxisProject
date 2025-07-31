@@ -29,6 +29,36 @@ The toolkit includes vectorized methods for computing FHA parameters from time-s
   * Axis of average motion estimation
 
 ---
+## FHA Versions
+
+The repository contains several implementations of the FHA analysis to accommodate different needs:
+
+### `FHA_plt`
+
+This version uses **Matplotlib (plt)** for visualization.
+
+* **Slow** to compute and render.
+* **Best for understanding the code** due to its simplicity and readability.
+
+### `FHA_plotly_traditional`
+
+This version uses **Plotly** for interactive 3D plots, based on a **traditional (non-vectorized)** computation approach.
+
+* **Slow to compute**, but
+* **Faster to render** and
+* **Equally understandable** as the `FHA_plt` version.
+
+### `FHA_plotly_fast`
+
+This version uses **Plotly with vectorized FHA computation**.
+
+* **Much faster** compute and rendering performance.
+* Currently supports only:
+
+  * `method_type = 'step_angle'`
+  * `method_type = 'incremental_angle'`
+
+---
 
 ## Input Requirements
 

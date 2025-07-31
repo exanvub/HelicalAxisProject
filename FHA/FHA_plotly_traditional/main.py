@@ -3,7 +3,7 @@ from dash import html, dcc, Output, Input
 import config  # will be reloaded on button click using importlib
 import importlib
 
-from FHA_visualizer import plotly_visualize_FHA
+from FHA_visualizer_plotly import plotly_visualize_FHA
 import polhemus_import as pi
 import vicon_import as vi
 
@@ -39,7 +39,7 @@ def load_and_generate_figure():
 
     step = config.step if config.method_type != 'all_FHA' else 0
 
-    from FHA_visualizer import generate_FHA  # avoid circular imports
+    from FHA_visualizer_plotly import generate_FHA  # avoid circular imports
     hax, ang, svec, d, translation_1_list, translation_2_list, time_diff, time_incr, ang_incr, all_angles, ind_incr, ind_step, t = generate_FHA(
         config.method_type, t, int(config.cut1), int(config.cut2), int(step), int(config.nn),
         R1, R2, T1, T2, loc1, loc2

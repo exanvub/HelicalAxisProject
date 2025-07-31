@@ -96,7 +96,14 @@ def activate_method(method_type, t, Trel, loc1, loc2, all_hax, all_angles, all_s
         incrAng = np.cumsum(all_angles)
 
     if method_type == 'all_FHA':
-        return all_hax, all_angles, all_svec, all_d, all_translation_1_list, all_translation_2_list, ind_incr, ind_step, incrAng, t[:-1], all_angles
+        # return all_hax, all_angles, all_svec, all_d, all_translation_1_list, all_translation_2_list, ind_incr, ind_step, incrAng, t[:-1], all_angles
+        hax = all_hax
+        ang = all_angles
+        svec = all_svec
+        d = all_d
+
+        translation_1_list = all_translation_1_list
+        translation_2_list = all_translation_2_list
 
     elif method_type == 'incremental_time':
         # Define start and end matrices for vectorized calculation
@@ -271,6 +278,9 @@ def plotly_visualize_FHA(isPolhemus, T1, T2, method_type, hax, svec, d, ind_incr
 
     # Vectorized transformation of FHA vectors to the global reference frame
     # einsum for batched matrix-vector multiplication
+    print(len(hax))
+    print(len(R1_transform))
+
     transformed_hax = np.einsum('nij,nj->ni', R1_transform, hax) # Assuming hax are column vectors
     
     # Augment svec for homogeneous transformation
