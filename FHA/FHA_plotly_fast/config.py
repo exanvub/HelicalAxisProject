@@ -97,4 +97,10 @@ display_frame = 'auto'   # 'auto', 'lab' or 'body' (frame of the reference senso
 plane_offset = 0.0       # distance of the cross-section plane from the pivot, along the average axis
 color_by = 'time'        # 'time' or 'angle'
 max_axes = 300           # how many axes to draw
+# How the two bodies are drawn in the 3D view, where Play moves them through the frames:
+# 'segments' a sensor: a block on it, joined to the joint by a bar
+#            a Vicon marker cluster: a plate through its three frame markers, a block on each marker
+# 'blocks'   the blocks alone                    'none' no bodies
+# These are stand-ins; a bone surface can take their place later (see shapes.py).
+bodies = 'segments'
 theme = 'light'          # 'light' or 'dark'

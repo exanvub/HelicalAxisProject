@@ -125,7 +125,8 @@ together with the window size. Details: findings F17–F19 in the research log.
 **What the page shows.**
 
 * **Helical axes in space** — the axes, their average axis and pivot, the cross-section
-  plane, and the sensor paths.
+  plane, the paths of the sensors and a simple shape for each of the two bodies. The
+  play bar underneath moves the bodies through the selected frames.
 * **Direction map** — which way each axis points; distance from the centre is its angle
   to the average axis, in degrees.
 * **Position map** — where each axis crosses the plane through the pivot (move the plane
@@ -141,6 +142,31 @@ together with the window size. Details: findings F17–F19 in the research log.
 * **Recording** — joint rotation over the whole file with the analysed frames shaded; for
   Vicon, also the residual of the marker fit.
 * Headline numbers, a table of the axes, and **Download axes (CSV)**.
+
+**Playing the motion back.** Under the 3D view: **Play**, a slider for the playhead,
+the speed (¼× to 4×) and *loop*. While it plays, or while you drag the slider:
+
+* the two bodies move in the 3D view, and the axis that belongs to that instant (the
+  one whose window holds the frame) is picked out as "Axis at the playhead";
+* every plot with time along x shows a vertical line at that instant;
+* the maps and the build-up show a ring on the point that belongs to it. Where no window
+  holds the frame (at rest, before the first window is full) there is no axis and no ring.
+
+The playhead stays where it is when you change a setting, and goes back to the start
+when you choose other frames or another recording.
+
+*Bodies* (under View, or `bodies` in `config.py`) chooses how the two bodies are drawn.
+"Segments": a sensor gets a block, joined to the joint by a bar; a Vicon marker cluster
+gets a plate through the three markers that define its frame, with a small block on
+every marker. "Blocks only" leaves out bars and plates. "Hidden" draws no bodies. These
+are stand-ins: they show where each body is and how it turns, not what it looks like. A
+reference body that reaches far from the joint is cut off at the edge of the view.
+
+*Bone surfaces, later.* A shape is nothing but vertices and triangles in the coordinates
+of its body (`shapes.py`), and the page only ever moves vertices with the pose of their
+body. A bone surface given in the frame of its sensor or segment can therefore take the
+place of a basic shape in one spot (`_playback` in `FHA_visualizer_fast.py`). What is
+not there yet is reading a mesh file and the registration of the mesh to that frame.
 
 **Reading two-axis motion.** A helical axis tilts by the *ratio* of the two rotation
 rates during its window, not by how much second rotation has built up. If the second
@@ -206,7 +232,14 @@ arrival stamps into an even time base (`fc.even_time_base`), also when samples w
 delivered in bursts; taken at face value those make a filter distort the movement.
 
 Tests: `python tests/test_fha_core.py`, `tests/test_segment_frames.py`,
-`tests/test_dashboard.py` (also runnable with pytest).
+`tests/test_dashboard.py`, `tests/test_playback.py`, `tests/test_playback_browser.py`
+(also runnable with pytest). The last one opens the dashboard in headless Chrome and
+works the play button and the slider; it is skipped where no Chrome is installed.
+
+Playback runs in the browser (`assets/playback.js`); the server only draws the figures
+with the playhead at one position and sends the poses once. For speed that script moves
+the bodies and the playhead by reaching into Plotly's internals, with Plotly's own calls
+as the fallback; the browser test checks both ways against numpy.
 
 ---
 

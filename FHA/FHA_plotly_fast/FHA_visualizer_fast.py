@@ -20,6 +20,12 @@ of the moving body relative to the reference body (``fha_core.smooth_motion``). 
 cannot tell measurement noise from quick movement, so the analysis also records what
 the filter took out, next to the frame-to-frame jitter of the recording, and keeps the
 unsmoothed axes to draw underneath (finding F17).
+
+PLAYBACK. ``Analysis.play`` holds what is needed to play the selected frames back: the
+frames shown, the pose of both bodies at each, a basic shape for each body, and where
+the axis, the map points and the build-up stand at each. Every figure takes a ``step``
+and draws the playhead there; the page then moves it in the browser
+(``assets/playback.js``) without asking the server again.
 """
 import io
 from dataclasses import dataclass, field
@@ -31,6 +37,7 @@ from plotly.subplots import make_subplots
 from scipy.spatial.transform import Rotation
 
 import fha_core as fc
+import shapes as sh
 
 METHOD_LABELS = {
     "incremental_angle": "Moving window (miFHA)",
@@ -63,6 +70,10 @@ FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 
 # Cut-offs offered by the dashboard's smoothing slider, in Hz, from light to heavy.
 SMOOTHING_CUTOFFS = (20.0, 15.0, 10.0, 8.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.7, 0.5, 0.3, 0.2)
+
+# How the two bodies are drawn in the 3D view.
+BODY_STYLES = {"segments": "Segments", "blocks": "Blocks only", "none": "Hidden"}
+PLAY_STEPS = 1500       # at most this many positions of the playhead, spread evenly over the selected frames
 
 
 def _colorscale(th):
@@ -101,6 +112,7 @@ class Analysis:
     rotation: Optional[np.ndarray] = None      # (N_all,) rotation from the first frame of the cut, whole recording
     smoothing: Optional[dict] = None           # what the low-pass filter was and what it took out
     raw: Optional[dict] = None                 # the axes without smoothing, in the same maps (only when smoothing)
+    play: Optional[dict] = None                # playback: frames shown, body poses and shapes, playhead positions
     notes: list = field(default_factory=list)
 
     @property
@@ -169,8 +181,13 @@ def _evenly_in_rotation(fha, max_axes):
 
 def analyse(rec, cut=(0, None), method="incremental_angle", step=10.0, estimator="endpoints",
             criterion="net", frame="auto", plane_offset=0.0, color_by="time", max_axes=300,
-            primary_axis=None, primary_label=None, smoothing_hz=None, sweep=None):
+            primary_axis=None, primary_label=None, smoothing_hz=None, sweep=None, bodies="segments"):
     """Run the FHA pipeline on ``rec[cut]`` and derive everything the figures need.
+
+    bodies       how the two bodies are drawn in the 3D view (a key of ``BODY_STYLES``).
+                 "segments": for a sensor, a bar from the joint to it with a block on it;
+                 for a marker cluster, a plate through its three frame markers with a
+                 block on every marker. "blocks": the blocks alone. "none": nothing.
 
     smoothing_hz cut-off of a low-pass filter applied to the motion before anything
                  else, in Hz (-3 dB, no time shift; see ``fha_core.smooth``). ``None``
@@ -238,6 +255,7 @@ def analyse(rec, cut=(0, None), method="incremental_angle", step=10.0, estimator
     an = Analysis(rec, (c1, c2), params, fha, use, n, p, path2=path2, path1=path1, notes=notes,
                   rotation=rotation_cut, smoothing=smoothing)
     if an.empty:
+        an.play = _playback(an, T1, T2, Trel, bodies)
         return an
 
     an.n_bar, an.pivot = fc.average_axis(n, p, fha.weight)
@@ -311,7 +329,235 @@ def analyse(rec, cut=(0, None), method="incremental_angle", step=10.0, estimator
         if spans > 1.25 * float(step):
             notes.append(f"The frames are far apart in rotation, so the windows span about {spans:.0f}° where "
                          f"{step:g}° was asked: a window cannot end between two frames.")
+    an.play = _playback(an, T1, T2, Trel, bodies)
     return an
+
+
+# ------------------------------------------------------------------------- playback
+
+def _scene_scale(an):
+    """The sizes the 3D view is drawn to: ``arm`` (how far the origin of the moving body
+    gets from the pivot), ``show_ref`` (whether the origin of the reference body is near
+    enough to be in the picture), ``reach`` (the larger of the two when it is), the
+    ``spread`` of the axes on the plane, the drawn ``length`` of an axis and ``half``
+    the side of the plane."""
+    arm = float(np.linalg.norm(an.path2 - an.pivot, axis=1).max())
+    # The reference sensor is drawn for orientation, unless it sits so far from the joint
+    # that framing it would shrink everything else (a segment frame whose origin is far up
+    # the limb, or a lab-fixed sensor across the room).
+    ref_dist = float(np.linalg.norm(an.path1 - an.pivot, axis=1).max())
+    show_ref = ref_dist <= 4.0 * arm
+    reach = max(arm, ref_dist) if show_ref else arm
+    idx = an.draw
+    spread = float(np.nanpercentile(np.linalg.norm(an.pos[idx], axis=1), 95)) if len(idx) else 0.0
+    length = max(1.2 * reach, 6 * spread, 1e-9)
+    markers = getattr(an.rec, "points", None)
+    if markers is not None and len(markers[1]) >= 2:
+        # A segment frame often has its origin at the joint, so `reach` is next to nothing;
+        # the axes are then drawn long enough to show beside the markers of the moving body.
+        m = np.asarray(markers[1], float)
+        length = max(length, 0.8 * float(np.linalg.norm(m[:, None, :] - m[None, :, :], axis=2).max()))
+    return dict(arm=arm, show_ref=show_ref, reach=reach, spread=spread, length=length,
+                half=max(1.6 * spread, 0.12 * length))
+
+
+def _axis_segments(an, length):
+    """Both ends of every axis as it is drawn: a segment of ``length`` centred on the
+    point of the axis nearest the pivot. (Centring on where it crosses the plane would
+    fling a badly tilted axis far away and stretch the whole scene around it.)"""
+    centre = an.p + np.einsum("ki,ki->k", an.plane_point - an.p, an.n)[:, None] * an.n
+    return centre - 0.5 * length * an.n, centre + 0.5 * length * an.n
+
+
+def _playback(an, T1, T2, Trel, bodies):
+    """Fill ``Analysis.play``. Everything is per playhead position (K of them):
+
+    ``index`` frame within the selection, ``frame`` in the recording, ``t``, ``rotation``
+    of the joint since the first selected frame; ``rate`` positions per second of
+    recording; ``bodies`` a list, per body drawn, of ``vertices`` and ``faces`` in the
+    body's own coordinates and its ``pose`` (K, 4, 4) in the display frame; ``axis``
+    (K, 2, 3) the two ends of the helical axis whose window holds that frame;
+    ``tilt``, ``pos``, ``build``, ``swing`` (K, 2) the same instant in the direction map,
+    the position map, the build-up curve and the tilt map. NaN where there is none.
+    ``box`` is the two corners of the 3D view: it holds everything at every instant.
+
+    A reference body that reaches far from the joint (a sensor across the room, a thigh
+    marked at the hip) is not allowed to set the size of the view: the view is fitted to
+    the joint and the moving body, the reference body may add a margin to that, and
+    whatever of it lies beyond is cut off, so that it shows as coming in from outside.
+    """
+    n = len(T1)
+    index = np.unique(np.round(np.linspace(0, n - 1, min(n, PLAY_STEPS))).astype(int))
+    count = len(index)
+    if an.frame == "lab":
+        P1, P2 = T1[index], T2[index]
+    else:
+        P1, P2 = np.tile(np.eye(4), (count, 1, 1)), Trel[index]
+    period = float(np.median(np.diff(an.t)))
+    nothing = np.full((count, 2), np.nan)
+    play = dict(index=index, frame=index + an.cut[0], t=an.t[index], rotation=an.rotation[index],
+                rate=(count - 1) / max((n - 1) * period, 1e-12), bodies=[], style=bodies,
+                axis=np.full((count, 2, 3), np.nan), axis_index=np.full(count, -1),
+                tilt=nothing, pos=nothing.copy(), build=nothing.copy(), swing=nothing.copy())
+
+    # --- the two bodies
+    origin1, origin2 = P1[:, :3, 3], P2[:, :3, 3]
+    if an.empty:
+        joint, show_ref = None, True
+        size = max(np.ptp(origin2, axis=0).max(), 0.3 * np.linalg.norm(origin2 - origin1, axis=1).mean())
+    else:
+        scale = _scene_scale(an)
+        joint, show_ref = an.pivot, scale["show_ref"]
+        size = max(scale["arm"], 0.25 * scale["length"])       # a sensor right at the joint still gets a visible block
+    size = size if size > 0 else 1.0
+    markers = getattr(an.rec, "points", None)
+
+    def shape(which, poses):
+        """One body in its own coordinates.
+
+        With markers (Vicon): a small block on every marker and, as a segment, a plate
+        through the three that define its frame. Otherwise (a sensor): a block on its
+        origin. As a segment, either is joined to the joint by a bar, unless it is
+        there already.
+        """
+        own = None                                      # the joint, in this body's coordinates
+        if bodies == "segments" and joint is not None:
+            inverse = fc.invert(poses)
+            own = (np.einsum("kij,j->ki", inverse[:, :3, :3], joint) + inverse[:, :3, 3]).mean(axis=0)
+        if markers is not None and len(markers[which]) >= 3:
+            on_body = np.asarray(markers[which], float)
+            extent = max(np.linalg.norm(on_body[i] - on_body[j]) for i, j in ((0, 1), (1, 2), (0, 2)))
+            parts = [sh.box(np.full(3, 0.07 * extent), centre=point) for point in on_body]
+            if bodies == "segments":
+                parts.insert(0, sh.plate(on_body[:3], 0.04 * extent))
+            if own is not None:
+                nearest = on_body[np.argmin(np.linalg.norm(on_body - own, axis=1))]
+                if np.linalg.norm(nearest - own) > 0.25 * extent:
+                    parts.append(sh.bar(own, nearest, 0.05 * extent, 0.03 * extent))
+            return sh.merge(*parts)
+        parts = [sh.box(np.array([0.16, 0.11, 0.07]) * size)]
+        if own is not None and np.linalg.norm(own) > 0.25 * size:
+            parts.insert(0, sh.bar(own, np.zeros(3), 0.09 * size, 0.05 * size))
+        return sh.merge(*parts)
+
+    def everywhere(vertices, poses):
+        """Where a body gets to over all playhead positions, as one cloud of points: its
+        vertices at each, or for a large mesh the corners of the box around it."""
+        if len(vertices) > 200:
+            low, high = vertices.min(axis=0), vertices.max(axis=0)
+            vertices = np.array([[x, y, z] for x in (low[0], high[0]) for y in (low[1], high[1]) for z in (low[2], high[2])])
+        return (np.einsum("kij,vj->kvi", poses[:, :3, :3], vertices) + poses[:, None, :3, 3]).reshape(-1, 3)
+
+    def fit(clouds):
+        cloud = np.vstack(clouds)
+        cloud = cloud[np.isfinite(cloud).all(axis=1)]
+        return cloud.min(axis=0), cloud.max(axis=0)
+
+    # --- the box of the 3D view. First what the view is about, at every instant: the axes,
+    # the plane, the moving body.
+    clouds = [origin2]
+    if show_ref:
+        clouds.append(origin1)
+    if not an.empty:
+        clouds += list(_axis_segments(an, 1.12 * scale["length"]))
+        clouds.append(an.pivot + np.outer([-0.65, 0.65], scale["length"] * an.n_bar))
+        clouds.append(np.array([an.plane_point + a * scale["half"] * an.e1 + b * scale["half"] * an.e2
+                                for a in (-1, 1) for b in (-1, 1)]))
+    if bodies != "none":
+        vertices, faces = shape(1, P2)
+        play["bodies"].append(dict(key="body2", name="Moving body", vertices=vertices, faces=faces, pose=P2))
+        clouds.append(everywhere(vertices, P2))
+    low, high = fit(clouds)
+
+    # Then the reference body, as far as it lies within a margin around that.
+    if bodies != "none":
+        vertices, faces = shape(0, P1)
+        margin = float((high - low).max())
+        turned = np.degrees(fc.net_angle(fc.quaternions(P1), fc.quaternions(P1[:1]))).max()
+        drifted = np.linalg.norm(origin1 - origin1[0], axis=1).max()
+        if turned < 2.0 and drifted < 0.05 * float((high - low).max()):
+            # it stands still in this frame, so it can be cut once and for all
+            vertices, faces = sh.clip_box(sh.move(vertices, P1[0]), faces, low - margin, high + margin)
+            vertices = sh.move(vertices, fc.invert(P1[:1])[0])
+        elif len(vertices):
+            spots = everywhere(vertices, P1)
+            if not ((spots >= low - margin) & (spots <= high + margin)).all():
+                vertices = vertices[:0]                # it moves and reaches too far: left out
+        if len(vertices):
+            play["bodies"].insert(0, dict(key="body1", name="Reference body", vertices=vertices, faces=faces, pose=P1))
+            low, high = fit([low[None, :], high[None, :], everywhere(vertices, P1)])
+    pad = 0.02 * float((high - low).max())
+    play["box"] = (low - pad, high + pad)
+
+    if an.empty:
+        return play
+
+    # --- the axis at the playhead: the one whose window holds that frame, nearest centre first.
+    # Of the windows ordered by their centres, only the two whose centres lie either side of
+    # the frame can be that one (windows either follow one another or have a centre each frame).
+    f = an.fha
+    order = np.argsort(f.ic, kind="stable")
+    centres = f.ic[order]
+    after = np.clip(np.searchsorted(centres, index), min(1, len(centres) - 1), len(centres) - 1)
+    before = np.maximum(after - 1, 0)
+    one, other = order[before], order[after]
+    if an.params["method"] == "reference_pose":          # each axis runs from the reference pose to its own frame
+        reach = max(1.0, (n - 1) / max(count - 1, 1))
+        holds_one, holds_other = np.abs(f.ic[one] - index) <= reach, np.abs(f.ic[other] - index) <= reach
+    else:
+        holds_one = (f.i0[one] <= index) & (index <= f.i1[one])
+        holds_other = (f.i0[other] <= index) & (index <= f.i1[other])
+    first = holds_one & (~holds_other | (np.abs(f.ic[one] - index) <= np.abs(f.ic[other] - index)))
+    nearest, held = np.where(first, one, other), holds_one | holds_other
+    start, end = _axis_segments(an, 1.12 * scale["length"])       # a little longer than the others, to stand out
+    play["axis"][held] = np.stack([start[nearest[held]], end[nearest[held]]], axis=1)
+    play["axis_index"][held] = nearest[held]
+    play["tilt"][held] = an.tilt[nearest[held]]
+    play["pos"][held] = an.pos[nearest[held]]
+    b = an.build
+    play["build"] = np.c_[np.abs(b["twist"][index]), b["magnitude"][index]]
+    play["swing"] = b["swing"][index]
+    return play
+
+
+def _listed(values, digits):
+    """Nested lists for JSON, rounded, with None where there is no value. (Arrays are not
+    sent as they are: Plotly 6 would encode them in a binary form the page's playback
+    code does not read.)"""
+    a = np.round(np.asarray(values, float), digits)
+    return np.where(np.isfinite(a), a, None).tolist() if a.dtype != object else a.tolist()
+
+
+def playback_store(an):
+    """``Analysis.play`` as the browser needs it (JSON): what ``assets/playback.js`` moves
+    when the playhead moves. Poses go as a quaternion (x, y, z, w) and a position."""
+    p = an.play
+    count = len(p["index"])
+    bodies = [dict(meta=f"playback:{b['key']}", v=_listed(b["vertices"], 5),
+                   q=_listed(Rotation.from_matrix(b["pose"][:, :3, :3]).as_quat(), 7), p=_listed(b["pose"][:, :3, 3], 5))
+              for b in p["bodies"]]
+    return dict(n=count, rate=float(p["rate"]), unit=an.rec.unit, t=_listed(p["t"], 5),
+                frame=[int(v) for v in p["frame"]], rotation=_listed(p["rotation"], 2), bodies=bodies,
+                axis=_listed(p["axis"].reshape(count, 6), 5),
+                points={"fig-direction": _listed(p["tilt"], 4), "fig-position": _listed(p["pos"], 5),
+                        "fig-buildup": _listed(p["build"], 3), "fig-swing": _listed(p["swing"], 4)},
+                lines=["fig-series", "fig-removed", "fig-overview"])
+
+
+def _playhead_line(fig, th, t):
+    """The playhead on a figure with time along x: one vertical line through all its panels."""
+    fig.add_shape(type="line", xref="x", yref="paper", x0=float(t), x1=float(t), y0=0, y1=1, name="playhead",
+                  line=dict(color=th["ink"], width=1.5))
+
+
+def _playhead_ring(fig, th, xy):
+    """The playhead on a figure without a time axis: a ring on the point that belongs to
+    it, 16 pixels across at any zoom. It is a shape, not a trace, because moving a shape
+    redraws only the shape; hidden when nothing belongs to the playhead (no axis there)."""
+    there = bool(np.isfinite(xy).all())
+    fig.add_shape(type="circle", xref="x", yref="y", xsizemode="pixel", ysizemode="pixel", x0=-8, x1=8, y0=-8, y1=8,
+                  xanchor=float(xy[0]) if there else 0.0, yanchor=float(xy[1]) if there else 0.0, visible=there,
+                  name="playhead", line=dict(color=th["ink"], width=2.5))
 
 
 # ------------------------------------------------------------------ figure helpers
@@ -407,12 +653,13 @@ def _hover_template(unit):
 
 
 def _map(an, th, xy, truth_xy, xlabel, ylabel, height, rings=False, origin_label="average axis",
-         hover=None, name="Helical axes", label_start=True, ghost_xy=None):
+         hover=None, name="Helical axes", label_start=True, ghost_xy=None, now=None):
     """Shared layout of the direction map, the position map and the tilt map of the
     build-up: one point per axis drawn, in the order they occur, coloured like the axes.
     ``hover`` is ``(values per axis, template)`` to replace the default tooltip.
     ``ghost_xy`` places the unsmoothed axes (``an.raw``) in the same map; they are drawn
-    as a grey line underneath, and the path of the smoothed ones turns blue."""
+    as a grey line underneath, and the path of the smoothed ones turns blue.
+    ``now`` is where the playhead is in this map (x, y); it gets a ring."""
     if an.empty:
         return _empty(th, height, "No axes for this selection")
     idx = an.draw
@@ -450,6 +697,8 @@ def _map(an, th, xy, truth_xy, xlabel, ylabel, height, rings=False, origin_label
         customdata=custom, hovertemplate=template))
     fig.add_trace(go.Scatter(x=[0], y=[0], mode="markers", showlegend=False, hoverinfo="skip",
                              marker=dict(symbol="cross-thin", size=14, line=dict(width=2, color=th["average"]))))
+    if now is not None:
+        _playhead_ring(fig, th, now)
     step = _nice_step(reach, 3)
     if rings:
         # label the rings on the side of the map away from the data
@@ -484,46 +733,41 @@ def _map(an, th, xy, truth_xy, xlabel, ylabel, height, rings=False, origin_label
     return fig
 
 
-def figure_direction_map(an, theme="light", height=340):
+def figure_direction_map(an, theme="light", height=340, step=None):
     th = THEMES[theme]
     truth = None if an.truth is None else an.truth["tilt"]
     return _map(an, th, an.tilt, truth, "tilt toward the moving sensor (deg)", "tilt across (deg)",
-                height, rings=True, ghost_xy=None if an.raw is None else an.raw["tilt"])
+                height, rings=True, ghost_xy=None if an.raw is None else an.raw["tilt"],
+                now=None if step is None else an.play["tilt"][step])
 
 
-def figure_position_map(an, theme="light", height=340):
+def figure_position_map(an, theme="light", height=340, step=None):
     th = THEMES[theme]
     unit = an.rec.unit
     truth = None if an.truth is None else an.truth["pos"]
     label = "pivot" if an.params["plane_offset"] == 0 else "average axis"
     return _map(an, th, an.pos, truth, f"toward the moving sensor ({unit})", f"across ({unit})",
-                height, origin_label=label, ghost_xy=None if an.raw is None else an.raw["pos"])
+                height, origin_label=label, ghost_xy=None if an.raw is None else an.raw["pos"],
+                now=None if step is None else an.play["pos"][step])
 
 
-def figure_scene(an, theme="light", height=700):
-    """3D view: the axes, their average axis and pivot, the cross-section plane, the sensors."""
+def figure_scene(an, theme="light", height=700, step=None):
+    """3D view: the axes, their average axis and pivot, the cross-section plane, the two bodies.
+
+    With ``step`` (a position of the playhead, see ``Analysis.play``) the bodies are drawn
+    where they are at that instant and the axis of that instant is picked out; the page
+    then moves both as the playhead moves. The box of the scene is fitted once to every
+    instant, so it does not rescale while the bodies move.
+    """
     th = THEMES[theme]
     if an.empty:
         return _empty(th, height, "No axes for this selection")
+    scale = _scene_scale(an)
+    reach, length, half, show_ref = scale["reach"], scale["length"], scale["half"], scale["show_ref"]
     idx = an.draw
-    n, p = an.n[idx], an.p[idx]
-    reach = np.linalg.norm(an.path2 - an.pivot, axis=1).max()
-    # The reference sensor is drawn for orientation, unless it sits so far from the joint
-    # that framing it would shrink everything else (a segment frame whose origin is far up
-    # the limb, or a lab-fixed sensor across the room).
-    ref_dist = np.linalg.norm(an.path1 - an.pivot, axis=1).max()
-    show_ref = ref_dist <= 4.0 * reach
-    if show_ref:
-        reach = max(reach, ref_dist)
-    spread = np.nanpercentile(np.linalg.norm(an.pos[idx], axis=1), 95) if len(idx) else 0.0
-    length = max(1.2 * reach, 6 * spread, 1e-9)
-    # Each axis is drawn as a segment centred on its point nearest the pivot. (Centring on
-    # where it crosses the plane would fling a badly tilted axis far away and stretch the
-    # whole scene around it.)
-    centre = p + np.einsum("ki,ki->k", an.plane_point - p, n)[:, None] * n
-    a, b = centre - 0.5 * length * n, centre + 0.5 * length * n
+    start, end = _axis_segments(an, length)
     seg = np.full((3 * len(idx), 3), np.nan)
-    seg[0::3], seg[1::3] = a, b
+    seg[0::3], seg[1::3] = start[idx], end[idx]
     col = np.repeat(an.color[idx], 3)
 
     fig = go.Figure()
@@ -533,7 +777,6 @@ def figure_scene(an, theme="light", height=700):
     fig.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode="lines", name="Helical axes",
                                line=dict(color=th["axes"], width=4)))
 
-    half = max(1.6 * spread, 0.12 * length)
     corners = np.array([an.plane_point + sx * half * an.e1 + sy * half * an.e2
                         for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))])
     fig.add_trace(go.Mesh3d(x=corners[:, 0], y=corners[:, 1], z=corners[:, 2], i=[0, 0], j=[1, 2], k=[2, 3],
@@ -562,29 +805,50 @@ def figure_scene(an, theme="light", height=700):
                                marker=dict(size=6, color=th["average"], line=dict(width=1, color=th["surface"])),
                                hovertemplate="pivot<br>%{x:.2f}, %{y:.2f}, %{z:.2f}<extra></extra>"))
 
+    # The bodies: the path of each one's origin, and at the playhead its shape. One legend
+    # entry stands for both.
+    meshes = {} if step is None else {body["key"]: body for body in an.play["bodies"]}
     fig.add_trace(go.Scatter3d(x=an.path2[:, 0], y=an.path2[:, 1], z=an.path2[:, 2], mode="lines",
-                               name="Moving sensor", line=dict(color=th["ink2"], width=4), hoverinfo="skip"))
+                               name="Moving body" if "body2" in meshes else "Moving sensor", legendgroup="body2",
+                               line=dict(color=th["ink2"], width=4), hoverinfo="skip"))
     if show_ref:
         p1 = an.path1
         moving1 = np.ptp(p1, axis=0).max() > 0.02 * max(reach, 1e-12)
         fig.add_trace(go.Scatter3d(
             x=p1[:, 0] if moving1 else [p1[:, 0].mean()], y=p1[:, 1] if moving1 else [p1[:, 1].mean()],
             z=p1[:, 2] if moving1 else [p1[:, 2].mean()], mode="lines" if moving1 else "markers",
-            name="Reference sensor", line=dict(color=th["muted"], width=4),
+            name="Reference body" if "body1" in meshes else "Reference sensor", legendgroup="body1",
+            line=dict(color=th["muted"], width=4),
             marker=dict(size=5, color=th["muted"], symbol="diamond"), hoverinfo="skip"))
+    look = {"body1": (th["muted"], 0.4), "body2": (th["ink2"], 0.45)}       # see-through: the axes pass inside them
+    for key, body in meshes.items():
+        v, faces = sh.move(body["vertices"], body["pose"][step]), body["faces"]
+        fig.add_trace(go.Mesh3d(x=v[:, 0], y=v[:, 1], z=v[:, 2], i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
+                                color=look[key][0], opacity=look[key][1], flatshading=True, hoverinfo="skip",
+                                name=body["name"], legendgroup=key, showlegend=key == "body1" and not show_ref,
+                                meta=f"playback:{key}"))
+    if step is not None:
+        now = [[None if not np.isfinite(v) else float(v) for v in an.play["axis"][step][:, k]] for k in range(3)]
+        fig.add_trace(go.Scatter3d(x=now[0], y=now[1], z=now[2], mode="lines", name="Axis at the playhead",
+                                   line=dict(color=th["ink"], width=8), hoverinfo="skip", meta="playback:axis"))
 
     unit = an.rec.unit
     ax3 = lambda name: dict(title=dict(text=f"{name} ({unit})", font=dict(color=th["ink2"], size=11)),
                             backgroundcolor=th["surface"], gridcolor=th["grid"], zerolinecolor=th["axis"],
                             showbackground=True, tickfont=dict(color=th["muted"], size=10))
-    layout = _layout(th, height, legend=True, margin=dict(l=0, r=0, t=30, b=0))
-    fig.update_layout(**layout, scene=dict(xaxis=ax3("x"), yaxis=ax3("y"), zaxis=ax3("z"), aspectmode="data",
+    axes3 = [ax3("x"), ax3("y"), ax3("z")]
+    if step is not None:
+        for k in range(3):                 # the box is fixed, so that it does not rescale while the bodies move
+            axes3[k]["range"] = [float(an.play["box"][0][k]), float(an.play["box"][1][k])]
+    entries = sum(1 for t in fig.data if t.name and t.showlegend is not False)
+    layout = _layout(th, height, legend=True, margin=dict(l=0, r=0, t=30 if entries <= 7 else 54, b=0))
+    fig.update_layout(**layout, scene=dict(xaxis=axes3[0], yaxis=axes3[1], zaxis=axes3[2], aspectmode="data",
                                            camera=dict(eye=dict(x=0.95, y=0.95, z=0.7))),
                       uirevision=f"{an.rec.label}|{an.frame}")
     return fig
 
 
-def figure_buildup(an, theme="light", height=340):
+def figure_buildup(an, theme="light", height=340, step=None):
     """Rotation accumulated away from the primary axis, against rotation about it.
 
     Unlike the direction map, which shows what happens inside each window, this shows
@@ -610,15 +874,25 @@ def figure_buildup(an, theme="light", height=340):
                              marker=dict(size=8, color=th["axes"], line=dict(width=2, color=th["surface"]))))
     fig.add_annotation(x=x[top], y=y[top], text=f"{y[top]:.1f}°", showarrow=False, xanchor="right", yanchor="bottom",
                        xshift=-8, yshift=2, font=dict(size=12, color=th["ink"]))
+    if step is not None:
+        _playhead_ring(fig, th, an.play["build"][step])
     fig.update_layout(**_layout(th, height, legend=has_truth, margin=dict(l=56, r=16, t=44 if has_truth else 22, b=44)),
                       hovermode="closest")
     fig.update_layout(legend=dict(y=1.06))
     fig.update_xaxes(**_axis(th, "rotation about the primary axis (deg)", rangemode="tozero"))
     fig.update_yaxes(**_axis(th, "rotation away from it (deg)", rangemode="tozero"))
+    if step is not None:
+        # Fixed axes, with room for the ring at either end of the curve. (Left to fit
+        # themselves, they would shift a little whenever the ring reaches an end.)
+        curves = [(x, y)] + ([(np.abs(b["truth"][0]), np.abs(b["truth"][1]))] if has_truth else [])
+        far = max(max(float(np.nanmax(cx)) for cx, _ in curves), 1e-6)
+        high = max(max(float(np.nanmax(cy)) for _, cy in curves), 1e-6)
+        fig.update_xaxes(range=[-0.03 * far, 1.06 * far])
+        fig.update_yaxes(range=[-0.04 * high, 1.14 * high])
     return fig
 
 
-def figure_swing_map(an, theme="light", height=340):
+def figure_swing_map(an, theme="light", height=340, step=None):
     """Which way the moving segment has tipped away from the primary axis, as seen from
     a frame that turns with the primary rotation. A second rotation about one carried
     axis runs out along a straight line; each burst moves the point further along it."""
@@ -631,10 +905,11 @@ def figure_swing_map(an, theme="light", height=340):
     template = ("t = %{customdata[0]:.2f} s<br>about the primary axis %{customdata[1]:.1f}°"
                 "<br>away from it %{customdata[2]:.2f}°<extra></extra>")
     return _map(an, th, xy, None, "toward the moving sensor (deg)", "across (deg)", height, rings=True,
-                origin_label="primary axis", hover=(values, template), name="Tilt built up", label_start=False)
+                origin_label="primary axis", hover=(values, template), name="Tilt built up", label_start=False,
+                now=None if step is None else an.play["swing"][step])
 
 
-def figure_series(an, theme="light", height=470):
+def figure_series(an, theme="light", height=470, step=None):
     """Three stacked panels on a shared time axis: tilt, distance, window size."""
     th = THEMES[theme]
     if an.empty:
@@ -692,6 +967,13 @@ def figure_series(an, theme="light", height=470):
     fig.update_layout(**_layout(th, height, legend=legend, margin=dict(l=56, r=16, t=40 if legend else 24, b=44)),
                       hovermode="x unified")
     fig.update_layout(legend=dict(y=1.04))
+    if step is not None:
+        # The time axis spans the selected frames, which is where the playhead travels; the
+        # axes exist only where a window fits. (Left to fit itself, the axis would stretch
+        # and shrink as the playhead passes its ends.)
+        span = float(an.t[-1] - an.t[0])
+        fig.update_xaxes(range=[float(an.t[0]) - 0.01 * span, float(an.t[-1]) + 0.01 * span])
+        _playhead_line(fig, th, an.play["t"][step])
     return fig
 
 
@@ -764,7 +1046,7 @@ def figure_smoothing_sweep(an, theme="light", height=280):
     return fig
 
 
-def figure_smoothing_removed(an, theme="light", height=280):
+def figure_smoothing_removed(an, theme="light", height=280, step=None):
     """What the chosen cut-off removes at each selected frame: the angle between the
     measured and the smoothed relative pose. Noise alone gives an even band about as
     high as the frame-to-frame jitter (the horizontal line); humps that come and go with
@@ -794,11 +1076,14 @@ def figure_smoothing_removed(an, theme="light", height=280):
     fig.update_xaxes(**_axis(th, "time (s)", showspikes=True, spikemode="across", spikecolor=th["muted"],
                              spikethickness=1, spikedash="solid"))
     fig.update_yaxes(**_axis(th, f"removed at {s['cutoff']:g} Hz, each frame (deg)", rangemode="tozero"))
+    if step is not None:
+        _playhead_line(fig, th, an.play["t"][step])
     return fig
 
 
-def figure_overview(rec, cut, theme="light", height=None):
-    """The whole recording: joint rotation against time, with the selected frames marked."""
+def figure_overview(rec, cut, theme="light", height=None, playhead=None):
+    """The whole recording: joint rotation against time, with the selected frames marked
+    and, if given, the playhead at time ``playhead``."""
     th = THEMES[theme]
     has_quality = rec.quality is not None
     height = height or (300 if has_quality else 200)
@@ -830,6 +1115,8 @@ def figure_overview(rec, cut, theme="light", height=None):
     else:
         fig.update_xaxes(**_axis(th, "time (s)", **spike), row=1, col=1)
     fig.update_layout(**_layout(th, height, margin=dict(l=56, r=16, t=24, b=44)), hovermode="x unified")
+    if playhead is not None:
+        _playhead_line(fig, th, playhead)
     return fig
 
 

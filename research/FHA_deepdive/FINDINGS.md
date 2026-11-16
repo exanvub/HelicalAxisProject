@@ -7,7 +7,9 @@ rotation component is introduced, and what to change.
 - Dates: 2026-11-15 (two rounds; F14–F16 come from the second, after the user's questions
   on the window threshold and on adding up rotation instead of tracking the axis) and
   2026-11-16 (third round, F17–F19: a smoothing filter, asked for with the note that the
-  end goal is human joint kinematics from the motion lab and from dynamic 4D CT)
+  end goal is human joint kinematics from the motion lab and from dynamic 4D CT; fourth
+  round, F20: playing the motion back in the dashboard, with basic shapes for the two
+  bodies until bone surfaces are available)
 - Code studied: `FHA/FHA_plotly_fast/` as of commit `5b32fa5`. A verbatim copy is kept in
   `original_snapshot/`; "the original" below always means that copy.
 - Reference: ISB 2025 presentation, `HelicalAxis-Literature/ISB_2025_Van_Vlasselaer.pdf`
@@ -85,6 +87,10 @@ rotation component is introduced, and what to change.
     frames for jumps. With two dozen frames, as in dynamic CT, a filter helps a little
     in a narrow range (axis error −16% at 1 Hz) and harms below it. Simulated only.
 
+16. **The dashboard plays the motion back** (F20): two basic shapes for the bodies, the
+    axis of each instant picked out, and the playhead shown on every plot. This is a
+    tool, not a result; F20 records what had to be learnt to make it smooth.
+
 Section 5 lists what was changed in the code, section 6 what to do about the rigs,
 section 7 what is still open.
 
@@ -114,7 +120,8 @@ Each script prints the numbers quoted here and writes its figure to `figures/`.
 `scripts/common.py` loads the original pipeline from `original_snapshot/` and the revised
 code from `FHA/FHA_plotly_fast/`. Tests of the revised code:
 `python FHA/FHA_plotly_fast/tests/test_fha_core.py` (and `test_segment_frames.py`,
-`test_dashboard.py`).
+`test_dashboard.py`, `test_playback.py`, `test_playback_browser.py`; the last opens the
+dashboard in headless Chrome and prints the timings quoted in F20).
 
 All numbers below were regenerated with the final code. Where the second round changed
 the window rule, the tables of F7, F8, F11 and F12 moved in the third digit and were
@@ -906,6 +913,59 @@ the instantaneous true axis.)
 - Cut-offs at or above half the frame rate do nothing, and the dashboard says so
   instead of pretending.
 
+### F20 — Playing the motion back: what it takes to make it smooth — VERIFIED
+`FHA/FHA_plotly_fast/tests/test_playback_browser.py` (headless Chrome), `tests/test_playback.py`;
+`assets/playback.js`, `shapes.py`. Dashboard: `figures/09`–`11`, `16`, `17`
+(Polhemus, simulator, knee) and `figures/18_dashboard_playback_vicon.png`.
+
+Asked for: meshes of basic shapes for the two rigid bodies, playback of the motion, and
+a vertical line on the plots showing where the playback is. Bone surfaces are to
+replace the shapes later; none exist yet.
+
+**What is drawn.** A sensor: a block on its origin, joined to the joint (the pivot of
+the axes) by a bar of rectangular section, so that a turn about the bar's own length
+shows. A Vicon marker cluster: a plate through the three markers that define its frame
+and a small block on every marker, joined to the joint by a bar if the nearest marker
+is more than a quarter of the cluster's size away. A shape is vertices and triangles in
+the coordinates of its body; the page moves the vertices with the pose of that body, so
+a bone surface in the same coordinates can replace it without other changes.
+
+**Three things that were not obvious.**
+
+- *Moving anything through Plotly's own calls redraws the whole figure.* Moving a shape
+  with `relayout` recomputes every trace of its figure (shape positions are flagged
+  as affecting the axis ranges): 5–17 ms per plot. `restyle` on the 3D view rebuilds
+  every trace of the scene: about 20 ms. With all figures on screen that is 55–70 ms
+  per step. Handing the moved traces straight to the scene's own objects, and sliding
+  the drawn shape while updating Plotly's record of where it is, takes **1 to 2 ms** for
+  all figures together (plotly.js 2.20, 3.4 and 3.5; Apple M1 Pro). The direct way uses
+  Plotly internals, so each step checks what it needs and falls back to Plotly's calls;
+  the browser test compares the two against numpy (they agree to the rounding of what
+  is sent, under 0.001 cm or degree) and against each other on screen (within a pixel).
+- *Dash 4 spends about 90 ms on a tick whose callback changes nothing*, and 140 ms on
+  one that moves a slider and a line of text: a play loop written as Dash callbacks (a
+  clock ticking, a callback moving the slider, another moving the figures) ran at 25
+  frames a second under Dash 2.9 and 2.14 and at 7 under Dash 4.1, although moving the
+  figures took 2.5 ms. The loop, the play button and the slider therefore run
+  entirely in the browser; Dash delivers the poses once per analysis and is told where
+  the playhead stopped. Playback then runs at the display's 60 frames a second under
+  all three, and follows the clock, so a slow machine drops frames instead of slowing
+  the movement.
+- *The 3D view does not cut a mesh at its axis ranges.* The markers of the reference
+  cluster of the Vicon rig sit 125–384 mm from the pivot (those of the moving cluster
+  23–116 mm); framed whole, it shrinks the joint to a corner of the view, and left
+  outside the ranges it is drawn across the whole picture. The view is therefore
+  fitted to the axes and the moving body at every instant, the reference body may add
+  a margin of that size, and the rest of it is cut off in the mesh itself. An axis
+  left to fit itself also stretches and shrinks as the playhead passes its ends, so the
+  scene, the build-up and the time axis of "Along the movement" have fixed ranges
+  during playback.
+
+**Which axis is "the axis at the playhead".** The one whose window holds the frame,
+nearest centre first. At rest and before the first window is full there is none; the
+fixed-lag and consecutive-window methods have a window at every frame, so with them an
+axis is shown throughout, including the ill-conditioned ones at rest.
+
 ---
 
 ## 4. Status of the hypotheses
@@ -936,12 +996,13 @@ were not touched and still behave as the original.
 |---|---|
 | `fha_core.py` (new) | All numerics, no plotting. Screw extraction through the rotation vector (exact 0–180°, NaN instead of a near-zero vector when there is no rotation). Windows that close on **net rotation**, built **symmetrically around the frame they are assigned to** and widened until their two ends are the full requested rotation apart (F14); dropped when the rotation reverses inside them or the pose jumps, but not merely because the frames are coarse (F19). Sign-safe average axis with a least-squares pivot. Averaging weights that make every degree of motion count equally, so slow or paused stretches do not dominate. New `reference_pose` method. Optional `estimator="fit"` and `criterion="path"` (the original window rule) for comparison. `swing_twist`: rotation accumulated about an axis and away from it, optionally as seen from a frame turning with the primary rotation (F15). Third round: `smooth`, `smooth_poses`, `smooth_motion` (low-pass in screw coordinates of the relative pose), `removed_by_smoothing`, `jitter` (F17, F19); `even_time_base` (F18). |
 | `synthetic.py` (new) | Simulated two-axis rig with the exact instantaneous axis, four ways of delivering the second rotation, and measurement-error presets calibrated on the test recordings. |
-| `recordings.py` (new) | One loader for Polhemus, Vicon and the simulator. Polhemus timestamps are replaced by an even time base, also when samples arrived in bursts, the recording was paused or the host clock was set back (F18); the notes under the controls say what was done. ezc3d is only imported when a C3D file is opened. |
+| `recordings.py` (new) | One loader for Polhemus, Vicon and the simulator. Polhemus timestamps are replaced by an even time base, also when samples arrived in bursts, the recording was paused or the host clock was set back (F18); the notes under the controls say what was done. ezc3d is only imported when a C3D file is opened. A Vicon recording also carries where its markers sit on each segment (`points`), for drawing the bodies (F20). |
+| `shapes.py` (new) | Basic triangle meshes for the bodies: box, bar, plate, merging, cutting to a box. A mesh is vertices and faces in the coordinates of its body, which is also the form a bone surface would take (F20). |
 | `vicon_import.py` | Added `build_reference_frames_lsq`: least-squares rigid-body fit of each marker cluster to its median shape, same frame definition, returns the fit residual. The original `build_reference_frames` is unchanged. |
-| `FHA_visualizer_fast.py` | Rewritten: `analyse()` plus the figures. Position map, direction map, 3D scene, build-up curve and tilt map, per-axis series, recording overview. `primary_axis_of()` takes the primary axis from a reference recording. `calculate_FHA_vectorized` kept under its name, now exact. `generate_FHA` and `plotly_visualize_FHA` are gone (their only caller was `main.py`). Third round: `analyse(..., smoothing_hz=)` filters the whole recording before the cut, reports what was removed (`Analysis.smoothing`) and keeps the unsmoothed axes (`Analysis.raw`), which the maps and the series draw underneath in grey; `smoothing_sweep`, `figure_smoothing_sweep`, `figure_smoothing_removed` (F17). |
-| `main.py`, `assets/style.css` | Dashboard with controls for the recording, frame range, smoothing, method, window, window rule, estimator, display frame, plane offset, colour and theme, and for what the build-up is measured against (a reference recording, or the recording's own average axis with a warning); headline numbers; table; CSV export. The smoothing slider has a sentence beside it saying what the chosen cut-off removes, and a card "What the smoothing takes out" (F17). Screenshots: `figures/09_dashboard_polhemus3.png` (recording 3), `figures/10_dashboard_simulated_steady.png` and `figures/11_dashboard_simulated_pulsed.png` (simulator, with the true axis drawn in), `figures/16_dashboard_smoothing_knee.png` (knee flexion at 4 Hz) and `figures/17_dashboard_smoothing_simulated.png` (simulator with Vicon-like error at 1 Hz: smoothed axes against the true axis). Under Dash 4 the sliders and dropdowns now take the dashboard's colours in both themes. |
-| `config.py` | Same variables as before plus optional ones, among them `smoothing_hz` (0 = off); it now only sets what the dashboard opens with. |
-| `tests/` (new) | 80 tests: numerics against analytic answers (49), marker-frame fit and loaders (8), and every dashboard callback driven through its HTTP endpoint (23). Pass on Python 3.13 / Dash 2.14 / Plotly 6.5, on 3.11 / Dash 2.9 / Plotly 5.13 / SciPy 1.12, and on 3.11 / Dash 4.1 / Plotly 6.6. (The one Vicon dashboard test is skipped where ezc3d is not installed, as in the second of those.) The page was looked at in a headless browser under all three, in the light and the dark theme. |
+| `FHA_visualizer_fast.py` | Rewritten: `analyse()` plus the figures. Position map, direction map, 3D scene, build-up curve and tilt map, per-axis series, recording overview. `primary_axis_of()` takes the primary axis from a reference recording. `calculate_FHA_vectorized` kept under its name, now exact. `generate_FHA` and `plotly_visualize_FHA` are gone (their only caller was `main.py`). Third round: `analyse(..., smoothing_hz=)` filters the whole recording before the cut, reports what was removed (`Analysis.smoothing`) and keeps the unsmoothed axes (`Analysis.raw`), which the maps and the series draw underneath in grey; `smoothing_sweep`, `figure_smoothing_sweep`, `figure_smoothing_removed` (F17). Fourth round: `Analysis.play` (frames played, poses and shapes of the two bodies, the axis and the map points of each instant, the fixed box of the 3D view) and `playback_store` (the same as JSON for the browser); every figure takes a `step` and draws the playhead there (F20). |
+| `main.py`, `assets/style.css`, `assets/playback.js` | Dashboard with controls for the recording, frame range, smoothing, method, window, window rule, estimator, display frame, plane offset, colour and theme, and for what the build-up is measured against (a reference recording, or the recording's own average axis with a warning); headline numbers; table; CSV export. The smoothing slider has a sentence beside it saying what the chosen cut-off removes, and a card "What the smoothing takes out" (F17). Screenshots: `figures/09_dashboard_polhemus3.png` (recording 3), `figures/10_dashboard_simulated_steady.png` and `figures/11_dashboard_simulated_pulsed.png` (simulator, with the true axis drawn in), `figures/16_dashboard_smoothing_knee.png` (knee flexion at 4 Hz) and `figures/17_dashboard_smoothing_simulated.png` (simulator with Vicon-like error at 1 Hz: smoothed axes against the true axis). Under Dash 4 the sliders and dropdowns now take the dashboard's colours in both themes. Fourth round: a play bar under the 3D view (play, playhead slider, speed, loop) and a choice of how the bodies are drawn; `assets/playback.js` holds the whole of playback and runs in the browser (F20); `figures/18_dashboard_playback_vicon.png`. |
+| `config.py` | Same variables as before plus optional ones, among them `smoothing_hz` (0 = off) and `bodies`; it now only sets what the dashboard opens with. |
+| `tests/` (new) | 101 tests: numerics against analytic answers (49), marker-frame fit and loaders (8), every dashboard callback driven through its HTTP endpoint (28), playback data and shapes (15), and playback worked in headless Chrome through the real controls (1, skipped without Chrome). Pass on Python 3.13 / Dash 2.14 / Plotly 6.5, on 3.11 / Dash 2.9 / Plotly 5.13 / SciPy 1.12, and on 3.11 / Dash 4.1 / Plotly 6.6. (The Vicon tests are skipped where ezc3d is not installed, as in the second of those.) The page was looked at in a headless browser under all three, in the light and the dark theme. |
 
 Behaviour that differs from the original and should be kept in mind when comparing
 numbers with earlier results:
@@ -1064,6 +1125,12 @@ numbers with earlier results:
   4). If the whole rig is moved between recordings that check raises a false alarm;
   if only the sensor is re-seated on its segment by a small amount it is the right
   alarm. A repeat of the hinge trial at the end of a session would tell the two apart.
+- **Bone surfaces in the playback** (F20): the place for them is there (a mesh in the
+  coordinates of its body), reading a mesh file and registering it to the sensor or
+  segment frame are not. For skin-mounted sensors that registration is the hard part.
+- **Playback leans on Plotly internals for speed** (F20). If a later Plotly changes
+  them, playback falls back to Plotly's own calls and becomes slower, not wrong; the
+  browser test then fails on "moved directly" and says so.
 - **`FHA_plt` and `FHA_plotly_traditional`** still contain every defect listed in
   section 4.
 - **`FHA/main_CLI.py`** imports `FHA_visualizer`, which does not exist at that path; it

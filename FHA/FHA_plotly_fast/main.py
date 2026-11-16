@@ -4,15 +4,22 @@
 
 Pick a recording, a frame range and a method at the top; everything below follows.
 config.py sets what the page opens with — edit it and press "Reload config.py".
+
+Playing the motion back does not involve this file while it runs: the server draws each
+figure with the playhead at one position and sends what is needed to move it;
+assets/playback.js has the play button, the slider and the clock, and moves the figures
+in the browser.
 """
 import functools
+import hashlib
 import importlib
 import inspect
 import json
 import os
+import time
 
 import numpy as np
-from dash import Dash, Input, Output, State, dcc, html, no_update
+from dash import ClientsideFunction, Dash, Input, Output, State, dcc, html, no_update
 
 import config
 import FHA_visualizer_fast as fv
@@ -56,6 +63,7 @@ def read_config():
         build_up=get("build_up_axis", "reference"),
         reference_path=get("reference_path", ""),
         smoothing=float(get("smoothing_hz", 0) or 0),
+        bodies=get("bodies", "segments"),
     )
 
 
@@ -182,13 +190,38 @@ def card(title, caption, body, class_name=""):
                         className=f"card {class_name}".strip())
 
 
+def plain_slider(**settings):
+    """A slider without the number box Dash 4 puts beside it (the box would show a
+    position on the slider, not what the position means)."""
+    extra = {"allow_direct_input": False} if "allow_direct_input" in inspect.signature(dcc.Slider).parameters else {}
+    return dcc.Slider(**settings, **extra)
+
+
+def transport():
+    """Play button, playhead, where the playhead is, speed and loop: under the 3D view.
+
+    Only the frame is laid out here. assets/playback.js puts the slider into
+    "playhead-holder", writes the text into "playhead-info", listens to the button and
+    sets data-playing on the bar, which decides which of the button's two labels shows.
+    """
+    speeds = [("¼×", 0.25), ("½×", 0.5), ("1×", 1), ("2×", 2), ("4×", 4)]
+    return html.Div([
+        html.Button([html.Span("▶ Play", className="when-paused"), html.Span("❚❚ Pause", className="when-playing")],
+                    id="play", className="button ghost", title="Play the selected frames back"),
+        html.Div(id="playhead-holder", className="playhead-holder"),
+        html.Div(id="playhead-info", className="playhead-info"),
+        dcc.RadioItems(id="speed", value=1, className="segmented",
+                       options=[{"label": label, "value": value} for label, value in speeds]),
+        dcc.Checklist(id="loop", value=[], className="check", options=[{"label": "loop", "value": "loop"}]),
+        html.Button(id="playhead-sync", n_clicks=0, style={"display": "none"}, tabIndex=-1, **{"aria-hidden": "true"}),
+    ], id="transport", className="transport", **{"data-playing": "false"})
+
+
 def smoothing_slider(cfg):
     marks = {0: "Off"}
     marks.update({i + 1: f"{c:g}" for i, c in enumerate(fv.SMOOTHING_CUTOFFS)})
-    # Dash 4 adds a number box next to a slider; it would show the position, not the cut-off
-    extra = {"allow_direct_input": False} if "allow_direct_input" in inspect.signature(dcc.Slider).parameters else {}
-    return dcc.Slider(id="smoothing", min=0, max=len(fv.SMOOTHING_CUTOFFS), step=1, marks=marks, included=True,
-                      value=smoothing_position(cfg["smoothing"]), updatemode="mouseup", **extra)
+    return plain_slider(id="smoothing", min=0, max=len(fv.SMOOTHING_CUTOFFS), step=1, marks=marks, included=True,
+                        value=smoothing_position(cfg["smoothing"]), updatemode="mouseup")
 
 
 def serve_layout():
@@ -268,6 +301,9 @@ def serve_layout():
                 field("Axes drawn", dcc.Input(id="max-axes", type="number", min=10, max=5000, step=10,
                                               value=cfg["max_axes"], debounce=True, className="number-input"),
                       width=110),
+                field("Bodies", dcc.Dropdown(id="bodies", value=cfg["bodies"] if cfg["bodies"] in fv.BODY_STYLES else "segments",
+                                             options=[{"label": v, "value": k} for k, v in fv.BODY_STYLES.items()],
+                                             **dropdown), width=150),
                 field("Theme", dcc.RadioItems(id="theme", value=cfg["theme"], className="segmented",
                                               options=[{"label": "Light", "value": "light"},
                                                        {"label": "Dark", "value": "dark"}])),
@@ -291,6 +327,8 @@ def serve_layout():
     return html.Div([
         dcc.Store(id="spec", data=dict(cfg=cfg)),
         dcc.Store(id="cfg", data=cfg),
+        dcc.Store(id="playback"),                        # what assets/playback.js moves the playhead with
+        dcc.Store(id="playhead-step"),                   # where it says the playhead is: {key, step}
         dcc.Download(id="download"),
         html.Header([
             html.Div([html.H1("Helical axis explorer"), html.Div(id="recording-name", className="subtitle")]),
@@ -307,7 +345,9 @@ def serve_layout():
         html.Div([
             card("Helical axes in space",
                  "Each line is the axis of one window; the thick line is their average, the dot on it the pivot. "
-                 "Drag to rotate.", graph("fig-scene", 700), "span-scene"),
+                 "The grey shapes stand for the two bodies. Play moves them through the selected frames and "
+                 "picks out the axis of each instant. Drag to rotate.",
+                 html.Div([graph("fig-scene", 700), transport()]), "span-scene"),
             html.Div([
                 card("Direction map",
                      "Which way each axis points: distance from the centre is its angle to the average axis.",
@@ -405,6 +445,7 @@ OUTPUTS = [
     ("fig-buildup", "figure"), ("fig-swing", "figure"), ("buildup-info", "children"),
     ("fig-series", "figure"), ("fig-sweep", "figure"), ("fig-removed", "figure"), ("fig-overview", "figure"),
     ("table", "children"), ("step-label", "children"), ("step", "disabled"),
+    ("playback", "data"),
 ]
 
 
@@ -421,9 +462,10 @@ def reply(values):
     Input("spec", "data"), Input("frames", "value"), Input("method", "value"), Input("step", "value"),
     Input("rule", "value"), Input("estimator", "value"), Input("frame", "value"), Input("color", "value"),
     Input("offset", "value"), Input("max-axes", "value"), Input("theme", "value"),
-    Input("buildup", "value"), Input("reference", "value"), Input("smoothing", "value"))
+    Input("buildup", "value"), Input("reference", "value"), Input("smoothing", "value"),
+    Input("bodies", "value"), State("playhead-step", "data"))
 def update(spec, frames, method, step, rule, estimator, frame, color, offset, max_axes, theme, how, reference,
-           smoothing):
+           smoothing, bodies, playhead):
     theme = theme if theme in fv.THEMES else "light"
     always = {"root.className": f"fha theme-{theme}", "step.disabled": method == "all_FHA",
               "step-label.children": "Lag (frames)" if method == "incremental_time" else "Window (deg)"}
@@ -436,7 +478,8 @@ def update(spec, frames, method, step, rule, estimator, frame, color, offset, ma
         axis, axis_label, axis_notes = primary_axis(spec, rec, how, reference)
         an = fv.analyse(rec, (int(frames[0]), int(frames[1]) + 1), method, step, estimator, rule, frame,
                         float(offset or 0.0), color, int(max_axes or 300), axis, axis_label,
-                        smoothing_hz=smoothing_cutoff(smoothing), sweep=get_sweep(spec))
+                        smoothing_hz=smoothing_cutoff(smoothing), sweep=get_sweep(spec),
+                        bodies=bodies if bodies in fv.BODY_STYLES else "segments")
     except Exception as exc:  # shown in the notes line; what is on screen stays
         return reply({**always, "notes.children": [html.Div(f"{type(exc).__name__}: {exc}", className="note error")]})
 
@@ -454,16 +497,37 @@ def update(spec, frames, method, step, rule, estimator, frame, color, offset, ma
                        html.Div([html.Span(value, className="tile-value"),
                                  html.Span(unit, className="tile-unit")])], className="tile")
              for label, value, unit in fv.summary(an)]
+    # The playhead stays where it is while the recording and the frames stay the same, and
+    # goes back to the start otherwise (assets/playback.js does the same on a new key).
+    key = hashlib.md5(f"{json.dumps(spec, sort_keys=True)}|{an.cut}".encode()).hexdigest()[:12]
+    last = len(an.play["index"]) - 1
+    same = isinstance(playhead, dict) and playhead.get("key") == key
+    at = min(max(int(playhead.get("step") or 0), 0), last) if same else 0
     return reply({
         **always, "recording-name.children": rec.label, "notes.children": notes, "tiles.children": tiles,
         "scale.children": scale_legend(an, theme), "smoothing-info.children": smoothing_info(an),
-        "fig-scene.figure": fv.figure_scene(an, theme), "fig-direction.figure": fv.figure_direction_map(an, theme),
-        "fig-position.figure": fv.figure_position_map(an, theme), "fig-buildup.figure": fv.figure_buildup(an, theme),
-        "fig-swing.figure": fv.figure_swing_map(an, theme), "buildup-info.children": buildup_info(an),
-        "fig-series.figure": fv.figure_series(an, theme), "fig-sweep.figure": fv.figure_smoothing_sweep(an, theme),
-        "fig-removed.figure": fv.figure_smoothing_removed(an, theme),
-        "fig-overview.figure": fv.figure_overview(rec, an.cut, theme), "table.children": table(an),
+        "fig-scene.figure": fv.figure_scene(an, theme, step=at),
+        "fig-direction.figure": fv.figure_direction_map(an, theme, step=at),
+        "fig-position.figure": fv.figure_position_map(an, theme, step=at),
+        "fig-buildup.figure": fv.figure_buildup(an, theme, step=at),
+        "fig-swing.figure": fv.figure_swing_map(an, theme, step=at), "buildup-info.children": buildup_info(an),
+        "fig-series.figure": fv.figure_series(an, theme, step=at),
+        "fig-sweep.figure": fv.figure_smoothing_sweep(an, theme),
+        "fig-removed.figure": fv.figure_smoothing_removed(an, theme, step=at),
+        "fig-overview.figure": fv.figure_overview(rec, an.cut, theme, playhead=an.play["t"][at]),
+        "table.children": table(an),
+        "playback.data": dict(fv.playback_store(an), key=key, stamp=f"{key}-{time.time_ns()}", step=at),
     })
+
+
+# Playback runs in the browser (assets/playback.js). This is Dash's one line to it: new
+# playback data and the speed and loop settings go in, and where the playhead is comes
+# back, for `update` to read the next time it draws. The script asks for it to run by
+# clicking the hidden "playhead-sync" button when the playhead has stopped somewhere new.
+app.clientside_callback(
+    ClientsideFunction(namespace="playback", function_name="sync"),
+    Output("playhead-step", "data"),
+    Input("playback", "data"), Input("speed", "value"), Input("loop", "value"), Input("playhead-sync", "n_clicks"))
 
 
 def smoothing_info(an):

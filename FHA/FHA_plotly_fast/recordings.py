@@ -41,6 +41,7 @@ class Recording:
     unit: str                       # length unit of the positions
     truth: Optional[dict] = None    # simulator only: true axis per frame, in the lab frame
     quality: Optional[dict] = None  # Vicon only: rigid-fit residual per segment, per frame
+    points: Optional[tuple] = None  # Vicon only: per body, where its markers sit in its own frame (m, 3)
     notes: list = field(default_factory=list)
 
     def __len__(self):
@@ -114,6 +115,14 @@ def load_vicon(path, markers_1, markers_2, frames="least_squares"):
         raise ValueError("Some frames have missing markers; fill the gaps or use markers that are always visible.")
     rec = Recording(os.path.basename(path), "vicon", np.asarray(t, float), np.asarray(T1, float),
                     np.asarray(T2, float), unit, quality=quality)
+
+    def on_segment(T, names):
+        """The markers of a segment in that segment's own frame: the median over the recording."""
+        inverse = fc.invert(np.asarray(T, float))
+        local = np.einsum("nij,nmj->nmi", inverse[:, :3, :3], vi.marker_array(marker_data, names)) + inverse[:, None, :3, 3]
+        return np.median(local, axis=0)
+
+    rec.points = (on_segment(rec.T1, list(markers_1)), on_segment(rec.T2, list(markers_2)))
     if quality is not None:
         r2 = quality["residual_2"]
         rec.notes.append(f"Moving-segment marker fit: median residual {np.median(r2):.2f} {unit}, "

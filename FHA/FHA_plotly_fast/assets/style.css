@@ -125,6 +125,20 @@ body:has(.fha.theme-dark) {
 /* three lines are kept free, so the controls below do not move while the slider does */
 .readout { flex: 1 1 380px; max-width: 76ch; min-height: 54px; margin-top: 20px; font-size: 12.5px; color: var(--ink2); }
 
+/* ---------------------------------------------------------------- playback */
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 4px 0 8px; }
+.transport .button { height: 32px; min-width: 92px; padding: 0 10px; justify-content: center; }
+/* the button holds both labels; assets/playback.js sets data-playing on the bar */
+.transport .when-playing, .transport[data-playing="true"] .when-paused { display: none; }
+.transport[data-playing="true"] .when-playing { display: inline; }
+.playhead-holder { flex: 1 1 140px; min-width: 120px; display: flex; align-items: center; }
+.playhead-holder input[type="range"] { width: 100%; height: 22px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.playhead-holder input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.playhead-info { flex: 0 0 auto; min-width: 250px; min-height: 18px; font-size: 12.5px; color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.transport .segmented { height: 30px; }
+.transport .segmented label { padding: 0 9px; font-size: 12.5px; }
+.transport .check { height: 30px; }
+
 /* Dash dropdown (react-select) */
 .fha .Select-control { height: 34px; border-radius: 6px; border-color: var(--axis); background: var(--surface); box-shadow: none; }
 .fha .Select--single > .Select-control .Select-value, .fha .Select-placeholder { line-height: 32px; color: var(--ink); font-size: 13px; }

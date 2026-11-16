@@ -33,7 +33,7 @@ CFG = dict(
     method="incremental_angle", cut=(100, 1500), step=10.0, rule="net", estimator="endpoints",
     frame="auto", offset=0.0, color="time", max_axes=300, theme="light",
     sim_profile="proportional", sim_noise="polhemus", sim_out_and_back=False,
-    build_up="reference", reference_path=FILE1, smoothing=0.0,
+    build_up="reference", reference_path=FILE1, smoothing=0.0, bodies="segments",
 )
 main.read_config = lambda: dict(CFG)
 CLIENT = main.app.server.test_client()
@@ -46,6 +46,7 @@ DEFAULTS = {
     "rule.value": "net", "estimator.value": "endpoints", "frame.value": "auto", "color.value": "time",
     "offset.value": 0, "max-axes.value": 300, "theme.value": "light", "download-btn.n_clicks": 1,
     "buildup.value": "reference", "reference.value": FILE1, "smoothing.value": 0,
+    "bodies.value": "segments", "playhead-step.data": None,
 }
 
 
@@ -188,7 +189,8 @@ def test_default_view_fills_every_panel():
     assert len(out["tiles.children"]) == 7 and "Mean angle" in text_of(out["tiles.children"])
     assert "lab frame" in text_of(out["notes.children"]) and "arrival times" in text_of(out["notes.children"])
     scene = trace_names(out["fig-scene.figure"])
-    for name in ("Helical axes", "Average axis", "Pivot", "Cross-section plane", "Moving sensor", "Reference sensor"):
+    for name in ("Helical axes", "Average axis", "Pivot", "Cross-section plane", "Moving body", "Reference body",
+                 "Axis at the playhead"):
         assert name in scene, name
     for fig in ("fig-direction.figure", "fig-position.figure"):
         assert n_points(out[fig], "Helical axes") > 10
@@ -419,6 +421,89 @@ def test_a_recording_that_cannot_be_smoothed_says_so_and_still_opens():
         assert "Sample times must increase" in str(exc)
     else:
         raise AssertionError("smoothing on a broken time base must not pass silently")
+
+
+# -------------------------------------------------------------------------- playback
+
+def playhead_of(fig):
+    return next(s for s in fig["layout"]["shapes"] if s.get("name") == "playhead")
+
+
+def test_layout_has_the_frame_of_the_playback_controls():
+    encoder = __import__("plotly").utils.PlotlyJSONEncoder
+    layout = json.loads(json.dumps(main.serve_layout(), cls=encoder))
+    bar = component(layout, "transport")
+    assert bar["props"]["data-playing"] == "false"
+    for part in ("play", "playhead-holder", "playhead-info", "speed", "loop", "playhead-sync"):
+        assert component(bar, part) is not None, part
+    assert "Play" in text_of(component(bar, "play")) and "Pause" in text_of(component(bar, "play"))
+    assert component(layout, "playback") is not None and component(layout, "playhead-step") is not None
+    assert [o["value"] for o in component(layout, "bodies")["props"]["options"]] == ["segments", "blocks", "none"]
+    assert component(layout, "bodies")["props"]["value"] == "segments"
+    script = CLIENT.get("/assets/playback.js")
+    assert script.status_code == 200 and b"api.playback" in script.data and b"sync:" in script.data
+    # Dash's one line to that script
+    key = next(k for k in main.app.callback_map if k == "playhead-step.data")
+    wiring = main.app.callback_map[key]
+    assert [f"{i['id']}.{i['property']}" for i in wiring["inputs"]] == ["playback.data", "speed.value", "loop.value",
+                                                                       "playhead-sync.n_clicks"]
+    assert any("playback" in str(c.get("clientside_function")) and "sync" in str(c.get("clientside_function"))
+               for c in main.app._callback_list)
+
+
+def test_the_page_is_sent_what_it_needs_to_play_the_motion_back():
+    out = update(**{"frames.value": [100, 1682]})
+    data = out["playback.data"]
+    assert data["n"] == 1500 and data["step"] == 0 and len(data["key"]) == 12 and data["stamp"].startswith(data["key"])
+    assert data["frame"][0] == 100 and data["frame"][-1] == 1682 and abs(data["rate"] - 120.0 * 1499 / 1582) < 0.05
+    assert [b["meta"] for b in data["bodies"]] == ["playback:body1", "playback:body2"]
+    assert all(len(b["q"]) == 1500 and len(b["p"]) == 1500 and len(b["v"][0]) == 3 for b in data["bodies"])
+    metas = [t.get("meta") for t in out["fig-scene.figure"]["data"] if t.get("meta")]
+    assert metas == ["playback:body1", "playback:body2", "playback:axis"]
+    assert abs(playhead_of(out["fig-series.figure"])["x0"] - data["t"][0]) < 1e-4       # times are sent to 0.1 ms
+    assert abs(playhead_of(out["fig-overview.figure"])["x0"] - data["t"][0]) < 1e-4
+    assert playhead_of(out["fig-direction.figure"])["visible"] is False, "at rest, before the first window"
+    assert out["fig-scene.figure"]["layout"]["scene"]["xaxis"]["range"] is not None, "the box is fixed"
+
+
+def test_figures_are_redrawn_with_the_playhead_where_the_page_says_it_is():
+    frames = {"frames.value": [100, 1682]}
+    first = update(**frames)
+    key, t = first["playback.data"]["key"], first["playback.data"]["t"]
+    parked = update(**frames, **{"playhead-step.data": {"key": key, "step": 700}, "theme.value": "dark"})
+    assert parked["playback.data"]["step"] == 700 and parked["playback.data"]["key"] == key
+    assert parked["playback.data"]["stamp"] != first["playback.data"]["stamp"], "new figures, new stamp"
+    assert abs(playhead_of(parked["fig-series.figure"])["x0"] - t[700]) < 1e-4
+    ring = playhead_of(parked["fig-direction.figure"])
+    assert ring["visible"] is True
+    assert np.allclose([ring["xanchor"], ring["yanchor"]], first["playback.data"]["points"]["fig-direction"][700], atol=1e-3)
+    axis = next(tr for tr in parked["fig-scene.figure"]["data"] if tr.get("meta") == "playback:axis")
+    assert np.allclose(array(axis["x"]), np.array(first["playback.data"]["axis"][700])[[0, 3]], atol=1e-4)
+    # beyond the end, or for another selection: clamped, or back to the start
+    assert update(**frames, **{"playhead-step.data": {"key": key, "step": 99999}})["playback.data"]["step"] == 1499
+    other = update(**{"frames.value": [100, 1500], "playhead-step.data": {"key": key, "step": 700}})
+    assert other["playback.data"]["key"] != key and other["playback.data"]["step"] == 0
+    assert update(**frames, **{"playhead-step.data": {"key": "something else", "step": 700}})["playback.data"]["step"] == 0
+
+
+def test_bodies_can_be_drawn_as_blocks_or_not_at_all():
+    whole = update(**{"bodies.value": "segments"})["playback.data"]["bodies"]
+    blocks = update(**{"bodies.value": "blocks"})["playback.data"]["bodies"]
+    assert [len(b["v"]) for b in whole] == [16, 16] and [len(b["v"]) for b in blocks] == [8, 8]
+    none = update(**{"bodies.value": "none"})
+    assert none["playback.data"]["bodies"] == []
+    scene = none["fig-scene.figure"]["data"]
+    assert [t.get("meta") for t in scene if t.get("meta")] == ["playback:axis"]
+    assert "Moving sensor" in trace_names(none["fig-scene.figure"])
+    assert update(**{"bodies.value": None})["playback.data"]["bodies"], "an empty choice falls back to segments"
+
+
+def test_playback_data_is_sent_even_when_no_axis_could_be_formed():
+    out = update(**{"frames.value": [0, 200]})
+    assert "No axis could be formed" in text_of(out["notes.children"])
+    data = out["playback.data"]
+    assert data["n"] == 201 and data["axis"][0] == [None] * 6 and len(data["bodies"]) == 2
+    assert abs(playhead_of(out["fig-overview.figure"])["x0"] - data["t"][0]) < 1e-4, "the recording still shows where the playhead is"
 
 
 # -------------------------------------------------------------------------- download
