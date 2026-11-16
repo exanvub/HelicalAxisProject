@@ -1,0 +1,203 @@
+/* Helical axis explorer — page styles.
+   Colours are roles, defined once per theme; the Plotly figures use the same values
+   (THEMES in FHA_visualizer_fast.py). */
+
+body { margin: 0; }
+
+.fha {
+  --surface: #fcfcfb;
+  --page: #f9f9f7;
+  --ink: #0b0b0b;
+  --ink2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --accent: #2a78d6;
+  --accent-wash: rgba(42, 120, 214, 0.12);
+  --critical: #d03b3b;
+  --border: rgba(11, 11, 11, 0.10);
+  color-scheme: light;
+
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 20px 24px 56px;
+  background: var(--page);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.fha.theme-dark {
+  --surface: #1a1a19;
+  --page: #0d0d0d;
+  --ink: #f0efec;
+  --ink2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --accent: #3987e5;
+  --accent-wash: rgba(57, 135, 229, 0.20);
+  --critical: #d03b3b;
+  --border: rgba(255, 255, 255, 0.10);
+  color-scheme: dark;
+}
+
+/* Dash 4 draws its own sliders, dropdowns and inputs and takes their colours from these
+   variables (Dash 2 and 3 ignore them). They are set on <body> because Dash 4 opens its
+   menus there, outside .fha; the values repeat the role colours above. */
+body:has(.fha) {
+  --Dash-Fill-Interactive-Strong: #2a78d6;
+  --Dash-Fill-Interactive-Weak: rgba(42, 120, 214, 0.12);
+  --Dash-Fill-Primary-Hover: rgba(42, 120, 214, 0.08);
+  --Dash-Fill-Primary-Active: rgba(42, 120, 214, 0.16);
+  --Dash-Fill-Inverse-Strong: #fcfcfb;
+  --Dash-Fill-Disabled: #e1e0d9;
+  --Dash-Stroke-Strong: #c3c2b7;
+  --Dash-Stroke-Weak: #e1e0d9;
+  --Dash-Text-Strong: #0b0b0b;
+  --Dash-Text-Primary: #0b0b0b;
+  --Dash-Text-Weak: #52514e;
+  --Dash-Text-Disabled: #898781;
+}
+body:has(.fha.theme-dark) {
+  --Dash-Fill-Interactive-Strong: #3987e5;
+  --Dash-Fill-Interactive-Weak: rgba(57, 135, 229, 0.20);
+  --Dash-Fill-Primary-Hover: rgba(57, 135, 229, 0.14);
+  --Dash-Fill-Primary-Active: rgba(57, 135, 229, 0.26);
+  --Dash-Fill-Inverse-Strong: #1a1a19;
+  --Dash-Fill-Disabled: #2c2c2a;
+  --Dash-Stroke-Strong: #383835;
+  --Dash-Stroke-Weak: #2c2c2a;
+  --Dash-Text-Strong: #f0efec;
+  --Dash-Text-Primary: #f0efec;
+  --Dash-Text-Weak: #c3c2b7;
+  --Dash-Text-Disabled: #898781;
+}
+
+/* ------------------------------------------------------------------ header */
+.page-header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.page-header h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.subtitle { color: var(--ink2); font-size: 13px; margin-top: 2px; min-height: 18px; overflow-wrap: anywhere; }
+.header-actions { display: flex; gap: 8px; }
+
+.button {
+  display: inline-flex; align-items: center; height: 34px; padding: 0 14px; box-sizing: border-box;
+  border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #ffffff;
+  font: inherit; font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; white-space: nowrap;
+}
+.button.ghost { background: transparent; color: var(--ink); border-color: var(--axis); }
+.button:focus-visible, .text-input:focus-visible, .number-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------------------------------------------------------------- controls */
+.controls {
+  display: flex; flex-wrap: wrap; gap: 14px 32px; padding: 14px 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+}
+.group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.group.grow { flex: 1 1 380px; }
+.group-title { font-size: 12px; font-weight: 600; color: var(--ink); }
+.row { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field-label { font-size: 12px; color: var(--ink2); }
+
+.text-input, .number-input {
+  height: 34px; width: 100%; box-sizing: border-box; padding: 0 8px; border-radius: 6px;
+  border: 1px solid var(--axis); background: var(--surface); color: var(--ink); font: inherit; font-size: 13px;
+}
+.number-input:disabled { color: var(--muted); background: var(--page); }
+
+.segmented { display: inline-flex; height: 34px; box-sizing: border-box; border: 1px solid var(--axis); border-radius: 6px; overflow: hidden; }
+/* Dash puts an inline display on each option label, hence !important */
+.segmented label { position: relative; display: inline-flex !important; align-items: center; padding: 0 12px; font-size: 13px; color: var(--ink2); border-right: 1px solid var(--axis); cursor: pointer; white-space: nowrap; }
+.segmented label:last-child { border-right: 0; }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented label:has(input:checked) { background: var(--accent-wash); color: var(--ink); font-weight: 600; }
+.segmented label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.check { display: inline-flex; align-items: center; height: 34px; font-size: 13px; color: var(--ink2); }
+.check input { margin-right: 6px; accent-color: var(--accent); }
+
+.slider { padding: 2px 6px 0; }
+.group.full { flex: 1 1 100%; }
+.smoothing-row { display: flex; flex-wrap: wrap; gap: 6px 32px; align-items: flex-start; }
+.smoothing-row .field { flex: 1 1 460px; max-width: 720px; }
+/* three lines are kept free, so the controls below do not move while the slider does */
+.readout { flex: 1 1 380px; max-width: 76ch; min-height: 54px; margin-top: 20px; font-size: 12.5px; color: var(--ink2); }
+
+/* Dash dropdown (react-select) */
+.fha .Select-control { height: 34px; border-radius: 6px; border-color: var(--axis); background: var(--surface); box-shadow: none; }
+.fha .Select--single > .Select-control .Select-value, .fha .Select-placeholder { line-height: 32px; color: var(--ink); font-size: 13px; }
+.fha .Select-value-label { color: var(--ink) !important; }
+.fha .Select-input { height: 32px; }
+.fha .Select-input > input { color: var(--ink); line-height: 16px; padding: 8px 0; }
+.fha .Select-arrow { border-top-color: var(--muted); }
+.fha .is-open .Select-arrow { border-bottom-color: var(--muted); }
+.fha .is-focused:not(.is-open) > .Select-control { border-color: var(--accent); box-shadow: none; }
+.fha .Select-menu-outer { background: var(--surface); border-color: var(--axis); border-radius: 0 0 6px 6px; font-size: 13px; z-index: 20; }
+.fha .VirtualizedSelectOption { background: var(--surface); color: var(--ink); }
+.fha .VirtualizedSelectFocusedOption { background: var(--accent-wash); }
+
+/* Dash range slider (rc-slider) */
+.fha .rc-slider-rail { background: var(--grid); }
+.fha .rc-slider-track { background: var(--accent); }
+.fha .rc-slider-handle { border-color: var(--accent); background: var(--surface); opacity: 1; }
+.fha .rc-slider-tooltip-inner { background: var(--ink); color: var(--surface); box-shadow: none; font-size: 11px; }
+.fha .rc-slider-tooltip-arrow { border-bottom-color: var(--ink); border-top-color: var(--ink); }
+.fha .rc-slider-mark-text { color: var(--ink2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.fha .rc-slider-mark-text-active { color: var(--ink); }
+.fha .rc-slider-dot { border-color: var(--axis); background: var(--surface); }
+.fha .rc-slider-dot-active { border-color: var(--accent); }
+
+/* ------------------------------------------------------------------- notes */
+.notes { display: flex; flex-direction: column; gap: 2px; margin: 12px 2px 0; }
+.note { font-size: 13px; color: var(--ink2); }
+.note.error { color: var(--ink); font-weight: 500; }
+.note.error::before {
+  content: "!"; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+  margin-right: 6px; border-radius: 50%; background: var(--critical); color: #ffffff; font-size: 11px; font-weight: 700;
+}
+
+/* ------------------------------------------------------------------- tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 12px 0; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.tile-label { font-size: 12px; color: var(--ink2); }
+.tile-value { font-size: 24px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+.tile-unit { font-size: 13px; color: var(--muted); margin-left: 5px; }
+
+/* ------------------------------------------------------------- colour key */
+.scale { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 2px 10px; font-size: 12px; color: var(--ink2); min-height: 18px; }
+.scale-label { margin-right: 4px; }
+.scale-bar { display: inline-block; width: 200px; height: 8px; border-radius: 4px; }
+.scale-end { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------------- cards */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px 8px; min-width: 0; margin-bottom: 12px; }
+.card-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
+.card-caption { margin: 2px 0 6px; font-size: 12.5px; color: var(--ink2); max-width: 78ch; }
+.grid-main { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 12px; }
+.grid-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.stack { display: flex; flex-direction: column; min-width: 0; }
+.pair { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 8px; }
+.pair.even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.card-note { margin: 4px 0 8px; font-size: 12.5px; color: var(--ink2); max-width: 92ch; }
+@media (max-width: 1100px) {
+  .grid-main, .grid-two { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 1000px) {
+  .readout { margin-top: 0; min-height: 0; }          /* it sits under the slider here, not beside it */
+}
+@media (max-width: 720px) {
+  .pair, .pair.even { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* While a callback runs, keep the previous render in place, dimmed — no flash. */
+.fha [data-dash-is-loading="true"] { opacity: 0.5; transition: opacity 0.15s; }
+
+/* ------------------------------------------------------------------- table */
+.table-wrap { max-height: 340px; overflow: auto; margin-bottom: 8px; }
+.axes-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.axes-table th, .axes-table td { padding: 5px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+.axes-table th { position: sticky; top: 0; background: var(--surface); color: var(--ink2); font-weight: 600; }
+.axes-table td { color: var(--ink); }
+.empty { color: var(--muted); font-size: 13px; padding: 12px 0; }

@@ -5,7 +5,6 @@ Created on Thu Jul 10 10:35:35 2025
 @author: Matteo Iurato
 """
 
-import ezc3d
 import numpy as np
 
 def read_data(path):
@@ -28,7 +27,10 @@ def read_data(path):
 
     """
     
-    
+
+    # Imported here so that Polhemus-only users do not need ezc3d installed
+    import ezc3d
+
     # Load a C3D file
     c3d = ezc3d.c3d(path)
     # Access points data (3D motion capture data)
@@ -211,3 +213,107 @@ def build_reference_frames(marker_data, marker1_j1, marker2_j1, marker3_j1, mark
     
     return np.array(J1_R), np.array(J1_T), np.array(J2_R), np.array(J2_T), loc1, loc2
     
+
+
+# ---------------------------------------------------------------------------
+# Least-squares segment frames
+# ---------------------------------------------------------------------------
+# build_reference_frames() above constructs each frame directly from three markers,
+# frame by frame. Its second axis runs along (marker3 - marker2); when those two
+# markers are close together (35 mm for the condyle markers of the servo-knee rig)
+# every bit of marker noise is amplified into orientation noise by that short
+# baseline, and markers beyond the first three are not used at all.
+#
+# The functions below instead fit ONE rigid body to all the markers of a segment at
+# every frame (Soderkvist & Wedin 1993 / Kabsch), then attach the same anatomical
+# frame definition to the fitted body. The frame keeps the same meaning; it is just
+# estimated from all the information available. The fit residual doubles as a
+# quality check: it spikes when a marker is mis-reconstructed.
+
+def marker_array(marker_data, names):
+    """Stack named markers into an array of shape (n_frames, n_markers, 3)."""
+    return np.stack([np.c_[marker_data[n]['x'], marker_data[n]['y'], marker_data[n]['z']]
+                     for n in names], axis=1).astype(float)
+
+
+def three_marker_frame(m1, m2, m3):
+    """Frame convention of build_reference_frames(), vectorised.
+
+    Origin at the midpoint of m2 and m3; rotation matrix with columns [k, i, j] where
+    i points from the midpoint to m3, j is normal to the marker plane, k = i x j.
+    Inputs have shape (..., 3); returns R (..., 3, 3) and origin (..., 3).
+    """
+    unit = lambda v: v / np.linalg.norm(v, axis=-1, keepdims=True)
+    mid = (m2 + m3) / 2
+    h = unit(m1 - mid)
+    i = unit(m3 - mid)
+    j = unit(np.cross(h, i))
+    k = unit(np.cross(i, j))
+    return np.stack([k, i, j], axis=-1), mid
+
+
+def rigid_body_fit(X, iterations=3):
+    """Least-squares rigid motion of a marker cluster.
+
+    X has shape (n_frames, n_markers, 3) with at least three non-collinear markers.
+    Returns
+      R         (n_frames, 3, 3) rotation of the cluster template into the lab
+      p         (n_frames, 3)    position of the template origin (cluster centroid)
+      template  (n_markers, 3)   mean cluster shape, centred on its centroid
+      residual  (n_frames,)      RMS distance between fitted and measured markers
+
+    The template is the median shape over the whole recording (generalised Procrustes
+    with a median in place of the mean), so it is far less noisy than the markers of any
+    single frame and is not dragged along by a marker that sits out of place for part
+    of the recording.
+    """
+    X = np.asarray(X, float)
+    if np.isnan(X).any():
+        bad = int(np.isnan(X).any(axis=(1, 2)).sum())
+        raise ValueError(f"{bad} frames have missing markers; fill or cut the gaps first")
+    centroid = X.mean(axis=1)
+    Xc = X - centroid[:, None, :]
+    template = Xc[0].copy()
+    for _ in range(max(iterations, 1)):
+        H = np.einsum('mi,nmj->nij', template, Xc)
+        U, _, Vt = np.linalg.svd(H)
+        V = np.swapaxes(Vt, 1, 2)
+        det = np.linalg.det(V @ np.swapaxes(U, 1, 2))
+        D = np.tile(np.eye(3), (len(X), 1, 1))
+        D[:, 2, 2] = det                                  # guard against reflections
+        R = V @ D @ np.swapaxes(U, 1, 2)
+        template = np.median(np.einsum('nji,nmj->nmi', R, Xc), axis=0)   # median of R^T x
+        template -= template.mean(axis=0)
+    fitted = np.einsum('nij,mj->nmi', R, template)
+    residual = np.sqrt(np.mean(np.sum((fitted - Xc) ** 2, axis=2), axis=1))
+    return R, centroid, template, residual
+
+
+def build_reference_frames_lsq(marker_data, markers_j1, markers_j2):
+    """Segment frames from a least-squares rigid-body fit of each marker cluster.
+
+    markers_j1, markers_j2 : lists of marker names for the two segments, three or
+        more each. The FIRST THREE of each list define the frame exactly as
+        build_reference_frames() does (same origin and axes); any further markers
+        only make the estimate more precise.
+
+    Returns J1_R, J1_T, J2_R, J2_T, loc1, loc2 like build_reference_frames(), plus a
+    seventh value: a dict with the fit residual of each segment per frame
+    ('residual_j1', 'residual_j2', in the units of the markers).
+    """
+    out = []
+    residuals = {}
+    for key, names in (('j1', markers_j1), ('j2', markers_j2)):
+        if len(names) < 3:
+            raise ValueError("each segment needs at least three markers")
+        R, p, template, residual = rigid_body_fit(marker_array(marker_data, names))
+        R_local, o_local = three_marker_frame(template[0], template[1], template[2])
+        R_seg = R @ R_local
+        origin = p + np.einsum('nij,j->ni', R, o_local)
+        T = np.tile(np.eye(4), (len(R), 1, 1))
+        T[:, :3, :3] = R_seg
+        T[:, :3, 3] = origin
+        out.append((R_seg, T, origin))
+        residuals['residual_' + key] = residual
+    (R1, T1, loc1), (R2, T2, loc2) = out
+    return R1, T1, R2, T2, loc1, loc2, residuals
